@@ -41,9 +41,62 @@
         });
       };
 
-      homeManagerModules.default = ./nix/hm-module.nix;
+      homeManagerModules.default =
+        { config, lib, pkgs, ... }:
+        {
+          imports = [ ./nix/hm-module.nix ];
 
-      nixosModules.default = ./nix/nixos-module.nix;
+          config = lib.mkIf config.services.wayland-stt.enable {
+            services.wayland-stt = {
+              package = lib.mkDefault (pkgs.callPackage ./nix/package.nix {
+                python = pkgs.python3.withPackages (ps: [
+                  ps.websockets
+                  ps.msgpack
+                ]);
+                src = self;
+              });
+              moshiPackage = lib.mkDefault (
+                let
+                  cudaPkgs' = import nixpkgs {
+                    inherit (pkgs.stdenv.hostPlatform) system;
+                    config = {
+                      allowUnfree = true;
+                      cudaSupport = true;
+                    };
+                  };
+                in
+                (cudaPkgs'.moshi.override {
+                  inherit (config.services.wayland-stt) cudaCapability;
+                }).overrideAttrs (old: {
+                  buildInputs = old.buildInputs ++ [ pkgs.oniguruma ];
+                  env = (old.env or { }) // {
+                    RUSTONIG_SYSTEM_LIBONIG = "1";
+                  };
+                  meta = old.meta // { mainProgram = "moshi-server"; };
+                })
+              );
+            };
+          };
+        };
+
+      nixosModules.default =
+        { config, lib, pkgs, ... }:
+        {
+          imports = [ ./nix/nixos-module.nix ];
+
+          config = lib.mkIf config.programs.wayland-stt.enable {
+            programs.wayland-stt = {
+              package = lib.mkDefault (pkgs.callPackage ./nix/package.nix {
+                python = pkgs.python3.withPackages (ps: [
+                  ps.websockets
+                  ps.msgpack
+                ]);
+                src = self;
+              });
+              moshiPackage = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.moshi-server;
+            };
+          };
+        };
 
       devShells.${system}.default = pkgs.mkShell {
         packages = [
@@ -51,6 +104,7 @@
           pkgs.wtype
           pkgs.libnotify
           pkgs.pipewire
+          pkgs.wireplumber
         ];
       };
     };

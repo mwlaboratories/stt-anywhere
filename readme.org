@@ -1,0 +1,161 @@
+#+title: wayland-stt
+#+description: Local push-to-talk streaming speech-to-text for Wayland
+
+Local push-to-talk streaming speech-to-text daemon for Wayland. Streams audio to a [[https://github.com/kyutai-labs/moshi][Kyutai STT]] server via WebSocket and types words live as they're recognized. Works on any Wayland compositor (niri, Hyprland, Sway, COSMIC, etc.).
+
+Bind a key, hold to talk, release — words appear at your cursor in real time.
+
+* How it works
+
+#+begin_example
+keybind → SIGUSR1 → pw-record → moshi-server (CUDA) → wtype (live typing)
+#+end_example
+
+Two systemd user services:
+
+#+begin_example
+[moshi-server]                        [wayland-stt.py]
+(systemd service)                     (systemd service)
+Loads STT model in VRAM               Lightweight WebSocket client
+Listens ws://localhost:8098
+                                      SIGUSR1 →
+/api/asr-streaming ◄─── WebSocket ─── pw-record (24kHz f32 mono)
+    │                                         │
+    └── Word tokens ─── WebSocket ──► wtype (types each word live)
+                                      SIGUSR1 → stop
+                                      SIGUSR2 → toggle mic/system audio
+#+end_example
+
+- *moshi-server* — Rust binary (candle + CUDA), keeps the STT model in VRAM, runs inference on GPU
+- *wayland-stt* — lightweight Python client: records audio via PipeWire, streams MessagePack chunks over WebSocket, types each recognized word with =wtype=
+- Audio is captured at 24 kHz mono f32, sent in 80 ms chunks (1920 samples)
+- Latency from speech to typed text is ~500 ms
+- Desktop notifications via =notify-send= for status updates
+
+* Requirements
+
+- NixOS (flake-based)
+- NVIDIA GPU with CUDA support
+- Wayland compositor
+- PipeWire (for audio capture)
+
+* Installation
+
+** Home Manager (recommended)
+
+Runs both =moshi-server= and =wayland-stt= as systemd user services.
+
+#+begin_src nix
+# flake.nix
+{
+  inputs.wayland-stt.url = "github:user/wayland-stt";
+
+  # ... in your home-manager config:
+  imports = [ inputs.wayland-stt.homeManagerModules.default ];
+
+  services.wayland-stt = {
+    enable = true;
+    cudaCapability = "8.6";  # see table below
+    language = "en";
+  };
+}
+#+end_src
+
+** NixOS module
+
+Just adds the packages to =environment.systemPackages= — you manage the services yourself.
+
+#+begin_src nix
+imports = [ inputs.wayland-stt.nixosModules.default ];
+programs.wayland-stt.enable = true;
+#+end_src
+
+** CUDA capability
+
+Set =cudaCapability= to match your GPU:
+
+| GPU            | Capability |
+|----------------+------------|
+| RTX 3060–3090  | ="8.6"=    |
+| RTX 4060–4090  | ="8.9"=    |
+| RTX 5070–5090  | ="10.0"=   |
+
+The model (~2.4 GB) is downloaded from HuggingFace on first run.
+
+* Keybinds
+
+Send =SIGUSR1= to toggle recording, =SIGUSR2= to switch between mic and system audio capture.
+
+** niri
+
+#+begin_src kdl
+binds {
+    Mod+V       { spawn "systemctl" "--user" "kill" "-s" "USR1" "wayland-stt.service"; }
+    Mod+Shift+V { spawn "systemctl" "--user" "kill" "-s" "USR2" "wayland-stt.service"; }
+}
+#+end_src
+
+** Hyprland
+
+#+begin_src conf
+bind = SUPER, V, exec, systemctl --user kill -s USR1 wayland-stt.service
+bind = SUPER SHIFT, V, exec, systemctl --user kill -s USR2 wayland-stt.service
+#+end_src
+
+** Sway
+
+#+begin_src conf
+bindsym $mod+v exec systemctl --user kill -s USR1 wayland-stt.service
+bindsym $mod+Shift+v exec systemctl --user kill -s USR2 wayland-stt.service
+#+end_src
+
+* Configuration
+
+** Home Manager options
+
+All options live under =services.wayland-stt=:
+
+| Option              | Type          | Default                             | Description                                          |
+|---------------------+---------------+-------------------------------------+------------------------------------------------------|
+| =enable=            | bool          |                                     | Enable both systemd user services                    |
+| =cudaCapability=    | string        | ="8.6"=                             | CUDA compute capability for moshi-server             |
+| =language=          | null or string | =null=                              | Language hint (=null= for auto-detect)               |
+| =sttModel=          | string        | ="kyutai/stt-1b-en_fr-candle"=      | HuggingFace model repo                               |
+| =serverPort=        | port          | =8098=                              | Port for moshi-server                                |
+| =extraEnvironment=  | attrs of string | ={}=                              | Extra env vars for the wayland-stt service             |
+| =package=           | package       | /auto/                              | Override the wayland-stt client package                |
+| =moshiPackage=      | package       | /auto (built from cudaCapability)/  | Override the moshi-server package                    |
+
+** Environment variables
+
+These can be set via =extraEnvironment= or in the shell when running standalone:
+
+| Variable              | Default                      | Description                           |
+|-----------------------+------------------------------+---------------------------------------|
+| =WAYLAND_STT_SERVER=    | =ws://127.0.0.1:8098=        | WebSocket URL for moshi-server        |
+| =WAYLAND_STT_API_KEY=   | =public_token=                | API key for moshi-server auth         |
+| =WAYLAND_STT_TARGET=    | /empty (default mic)/        | PipeWire node id/name to capture from |
+
+* Development
+
+#+begin_src sh
+nix develop                # dev shell with all dependencies
+nix build                  # build the wayland-stt client
+nix build .#moshi-server   # build moshi-server with CUDA
+nix flake check            # verify the flake
+#+end_src
+
+* Architecture
+
+#+begin_example
+flake.nix              Flake: packages, modules, devShells
+wayland-stt.py           Python client (WebSocket, pw-record, wtype)
+nix/
+  package.nix          Package derivation (writeShellApplication wrapper)
+  hm-module.nix        Home Manager module (systemd services)
+  nixos-module.nix     NixOS module (systemPackages)
+#+end_example
+
+The flake exports two packages (=default= for the client, =moshi-server= for the STT server) and two modules. The Home Manager module is the primary integration point — it sets up both systemd services with the correct wiring, builds =moshi-server= with your GPU's CUDA capability, and manages the STT config file.
+
+The client is a =writeShellApplication= wrapper around =wayland-stt.py= with runtime dependencies (Python + websockets/msgpack, wtype, libnotify, pipewire, wireplumber) on =PATH=.

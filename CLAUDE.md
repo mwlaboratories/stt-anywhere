@@ -4,16 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-wl-whispr is a local push-to-talk streaming speech-to-text daemon for Wayland. It streams audio to a Kyutai STT server (moshi-server) via WebSocket and types words live as they're recognized. Works on any Wayland compositor (niri, Hyprland, Sway, COSMIC, etc.).
+wayland-stt is a local push-to-talk streaming speech-to-text daemon for Wayland. It streams audio to a Kyutai STT server (moshi-server) via WebSocket and types words live as they're recognized. Works on any Wayland compositor (niri, Hyprland, Sway, COSMIC, etc.).
 
 **Pipeline:** keybind -> SIGUSR1 -> `pw-record` -> moshi-server (CUDA) -> `wtype` (live)
 
 ## Architecture
 
-Two-service design: a Rust STT server (`moshi-server`) handles GPU inference, and a lightweight Python client (`wl-whispr.py`) manages recording and text injection.
+Two-service design: a Rust STT server (`moshi-server`) handles GPU inference, and a lightweight Python client (`wayland-stt.py`) manages recording and text injection.
 
 ```
-[moshi-server]                        [wl-whispr.py]
+[moshi-server]                        [wayland-stt.py]
 (systemd service)                     (systemd service)
 Loads STT model in VRAM               Lightweight WS client
 Listens ws://localhost:8098
@@ -29,26 +29,42 @@ Listens ws://localhost:8098
 - **Recording:** PipeWire (`pw-record --raw`) captures audio as f32 at 24kHz mono, streamed to stdout
 - **Streaming:** WebSocket connection to moshi-server, audio sent as MessagePack chunks (1920 samples = 80ms)
 - **Text injection:** `wtype` types each word as it arrives from the server (~500ms latency)
-- **Notifications:** `notify-send` for status updates (recording, transcription results, errors)
+- **Notifications:** `notify-send` (fire-and-forget via `Popen`) for start/stop/error only — no transcription text shown
 - **Signal handling:** SIGUSR1 toggles recording, SIGUSR2 toggles mic/system audio capture
+- **Stop path:** Immediate "Stopped" notification, trailing silence sent in burst (not real-time), smart drain waits for server to finish (0.5s idle or 2s max)
+- **Preamble:** 1s silence sent at accelerated pace (~0.25s wall time) for model warmup
+
+## Deployment (path: flake input)
+
+Changes to `wayland-stt.py` must be **staged or committed** before rebuilding — Nix `path:` flake inputs ignore unstaged files.
+
+```sh
+# In wayland-stt repo:
+git add wayland-stt.py
+
+# In nixos-config repo:
+nix flake update wayland-stt
+sudo nixos-rebuild switch
+systemctl --user restart wayland-stt
+```
 
 ## File Structure
 
 ```
 flake.nix              # Flake: packages, homeManagerModules, nixosModules, devShells
-wl-whispr.py           # Main Python application (WebSocket client)
+wayland-stt.py           # Main Python application (WebSocket client)
 nix/
   package.nix          # Package derivation (writeShellApplication wrapper)
-  hm-module.nix        # Home Manager module (services.wl-whispr + moshi-server)
-  nixos-module.nix     # NixOS module (programs.wl-whispr)
+  hm-module.nix        # Home Manager module (services.wayland-stt + moshi-server)
+  nixos-module.nix     # NixOS module (programs.wayland-stt)
 ```
 
 ## Build & Run
 
-Nix flake, x86_64-linux only. The wl-whispr client itself does not require CUDA — that's handled by moshi-server:
+Nix flake, x86_64-linux only. The wayland-stt client itself does not require CUDA — that's handled by moshi-server:
 
 ```sh
-nix build                  # builds the wl-whispr client wrapper
+nix build                  # builds the wayland-stt client wrapper
 nix build .#moshi-server   # builds moshi-server with CUDA (from nixpkgs moshi + oniguruma fix)
 nix run                    # runs client (needs moshi-server running separately)
 nix develop                # dev shell with all dependencies
@@ -64,55 +80,49 @@ The `moshi-server` package in the flake overrides `pkgs.moshi` from nixpkgs to f
 
 ```nix
 # flake.nix inputs:
-inputs.wl-whispr.url = "github:user/wl-whispr";
+inputs.wayland-stt.url = "github:user/wayland-stt";
 
 # Home Manager (recommended — runs both services):
-imports = [ inputs.wl-whispr.homeManagerModules.default ];
-services.wl-whispr = {
+imports = [ inputs.wayland-stt.homeManagerModules.default ];
+services.wayland-stt = {
   enable = true;
-  package = inputs.wl-whispr.packages.x86_64-linux.default;
-  moshiPackage = inputs.wl-whispr.packages.x86_64-linux.moshi-server;
-  language = "en";
+  cudaCapability = "8.6";  # "8.9" for RTX 4090, etc.
 };
 
 # NixOS (just adds packages to systemPackages):
-imports = [ inputs.wl-whispr.nixosModules.default ];
-programs.wl-whispr = {
-  enable = true;
-  package = inputs.wl-whispr.packages.x86_64-linux.default;
-  moshiPackage = inputs.wl-whispr.packages.x86_64-linux.moshi-server;
-};
+imports = [ inputs.wayland-stt.nixosModules.default ];
+programs.wayland-stt.enable = true;
 ```
 
 Keybind examples (any Wayland compositor):
 ```kdl
 // niri
 binds {
-    Mod+V { spawn "systemctl" "--user" "kill" "-s" "USR1" "wl-whispr.service"; }
-    Mod+Shift+V { spawn "systemctl" "--user" "kill" "-s" "USR2" "wl-whispr.service"; }
+    Mod+V { spawn "systemctl" "--user" "kill" "-s" "USR1" "wayland-stt.service"; }
+    Mod+Shift+V { spawn "systemctl" "--user" "kill" "-s" "USR2" "wayland-stt.service"; }
 }
 ```
 
 ## Home Manager Module Options
 
-Under `services.wl-whispr`:
-- `enable` — enable both systemd user services (moshi-server + wl-whispr)
-- `package` — the wl-whispr package
-- `moshiPackage` — the moshi-server package (user-provided, must include CUDA support)
+Under `services.wayland-stt`:
+- `enable` — enable both systemd user services (moshi-server + wayland-stt)
+- `cudaCapability` — CUDA compute capability for moshi-server (default: `"8.6"`, e.g. `"8.9"` for RTX 4090)
+- `package` — the wayland-stt package (auto-provided, override for custom builds)
+- `moshiPackage` — the moshi-server package (auto-built from `cudaCapability`, override for custom builds)
 - `sttModel` — HuggingFace model repo (default: `"kyutai/stt-1b-en_fr-candle"`)
-- `language` — language hint, null for auto-detect (default: `null`)
 - `serverPort` — port for moshi-server (default: `8098`)
 - `extraEnvironment` — extra environment variables (default: `{}`)
 
 ## Environment Variables
 
-- `WL_WHISPR_SERVER` — WebSocket URL for moshi-server (default: `ws://127.0.0.1:8098`)
-- `WL_WHISPR_API_KEY` — API key for moshi-server auth (default: `public_token`)
-- `WL_WHISPR_TARGET` — PipeWire node id/name for audio capture (default: empty = default mic)
+- `WAYLAND_STT_SERVER` — WebSocket URL for moshi-server (default: `ws://127.0.0.1:8098`)
+- `WAYLAND_STT_API_KEY` — API key for moshi-server auth (default: `public_token`)
+- `WAYLAND_STT_TARGET` — PipeWire node id/name for audio capture (default: empty = default mic)
 
 ## Runtime Dependencies
 
-- **wl-whispr.py:** Python with `websockets` + `msgpack`, `wtype`, `libnotify`, `pipewire`, `wireplumber`
+- **wayland-stt.py:** Python with `websockets` + `msgpack`, `wtype`, `libnotify`, `pipewire`, `wireplumber`
 - **moshi-server:** Rust binary with CUDA (candle), provided by user
 
 Models are downloaded by moshi-server from HuggingFace on first run (~2.4GB for the 1B model).

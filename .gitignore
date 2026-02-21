@@ -1,2 +1,12 @@
 result
 .direnv
+
+# Models / weights
+*.bin
+*.safetensors
+*.gguf
+*.onnx
+*.pt
+*.pth
+*.ckpt
+models/

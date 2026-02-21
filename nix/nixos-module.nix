@@ -4,15 +4,15 @@
   ...
 }:
 let
-  cfg = config.programs.wl-whispr;
+  cfg = config.programs.wayland-stt;
 in
 {
-  options.programs.wl-whispr = {
-    enable = lib.mkEnableOption "wl-whispr push-to-talk speech-to-text";
+  options.programs.wayland-stt = {
+    enable = lib.mkEnableOption "wayland-stt push-to-talk speech-to-text";
 
     package = lib.mkOption {
       type = lib.types.package;
-      description = "The wl-whispr package to use.";
+      description = "The wayland-stt package to use.";
     };
 
     moshiPackage = lib.mkOption {

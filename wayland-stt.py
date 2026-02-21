@@ -1,4 +1,4 @@
-"""wl-whispr: Local push-to-talk streaming speech-to-text for Wayland.
+"""wayland-stt: Local push-to-talk streaming speech-to-text for Wayland.
 
 Streams audio to a Kyutai STT server via WebSocket and types words live via wtype.
 Pipeline: keybind -> SIGUSR1 -> pw-record -> moshi-server (CUDA) -> wtype
@@ -15,15 +15,14 @@ import time
 import msgpack
 import websockets
 
-SERVER_URL = os.environ.get("WL_WHISPR_SERVER", "ws://127.0.0.1:8098")
-API_KEY = os.environ.get("WL_WHISPR_API_KEY", "public_token")
-AUDIO_TARGET = os.environ.get("WL_WHISPR_TARGET", "")  # PipeWire node id/name, empty = default
+SERVER_URL = os.environ.get("WAYLAND_STT_SERVER", "ws://127.0.0.1:8098")
+API_KEY = os.environ.get("WAYLAND_STT_API_KEY", "public_token")
+AUDIO_TARGET = os.environ.get("WAYLAND_STT_TARGET", "")  # PipeWire node id/name, empty = default
 
 SAMPLE_RATE = 24000
 CHANNELS = 1
 CHUNK_SAMPLES = 1920  # 80ms at 24kHz
 CHUNK_BYTES = CHUNK_SAMPLES * 4  # f32 = 4 bytes per sample
-
 
 
 def get_default_sink():
@@ -45,10 +44,10 @@ def notify(message, urgency="normal"):
     subprocess.Popen(
         [
             "notify-send",
-            "-a", "wl-whispr",
-            "-h", "string:x-canonical-private-synchronous:wl-whispr",
+            "-a", "wayland-stt",
+            "-h", "string:x-canonical-private-synchronous:wayland-stt",
             "-u", urgency,
-            "wl-whispr",
+            "wayland-stt",
             message,
         ],
         stdout=subprocess.DEVNULL,
@@ -80,7 +79,7 @@ async def stream_session(stop_event, capture_system_audio):
         else:
             print("Warning: could not find default sink, using mic", flush=True)
     elif AUDIO_TARGET:
-        pw_cmd += [f"--target={AUDIO_TARGET}", "--properties=stream.capture.sink=true"]
+        pw_cmd += [f"--target={AUDIO_TARGET}"]
 
     pw_cmd.append("-")
 
@@ -122,7 +121,7 @@ async def stream_session(stop_event, capture_system_audio):
                     if not raw:
                         break
                     n_floats = len(raw) // 4
-                    samples = list(struct.unpack(f"<{n_floats}f", raw[:n_floats * 4]))
+                    samples = struct.unpack(f"<{n_floats}f", raw[:n_floats * 4])
                     if chunks_sent == 0:
                         peak = max(abs(s) for s in samples) if samples else 0
                         print(f"First chunk: {n_floats} floats, peak={peak:.4f}", flush=True)

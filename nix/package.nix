@@ -4,7 +4,7 @@
   src,
 }:
 pkgs.writeShellApplication {
-  name = "wl-whispr";
+  name = "wayland-stt";
   runtimeInputs = [
     python
     pkgs.wtype
@@ -13,6 +13,6 @@ pkgs.writeShellApplication {
     pkgs.wireplumber
   ];
   text = ''
-    exec python ${src}/wl-whispr.py "$@"
+    exec python ${src}/wayland-stt.py "$@"
   '';
 }

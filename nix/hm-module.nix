@@ -5,12 +5,12 @@
   ...
 }:
 let
-  cfg = config.services.wl-whispr;
+  cfg = config.services.wayland-stt;
 
   sttConfig = pkgs.writeText "stt-config.toml" ''
     static_dir = "/tmp"
     log_dir = "/tmp"
-    instance_name = "wl-whispr-stt"
+    instance_name = "wayland-stt-moshi"
     authorized_ids = ["public_token"]
 
     [modules.asr]
@@ -57,12 +57,12 @@ let
   '';
 in
 {
-  options.services.wl-whispr = {
-    enable = lib.mkEnableOption "wl-whispr push-to-talk speech-to-text daemon";
+  options.services.wayland-stt = {
+    enable = lib.mkEnableOption "wayland-stt push-to-talk speech-to-text daemon";
 
     package = lib.mkOption {
       type = lib.types.package;
-      description = "The wl-whispr package to use.";
+      description = "The wayland-stt package to use.";
     };
 
     moshiPackage = lib.mkOption {
@@ -70,16 +70,16 @@ in
       description = "The moshi-server package to use.";
     };
 
+    cudaCapability = lib.mkOption {
+      type = lib.types.str;
+      default = "8.6";
+      description = "CUDA compute capability for moshi-server (e.g. \"8.6\" for RTX 3090, \"8.9\" for RTX 4090).";
+    };
+
     sttModel = lib.mkOption {
       type = lib.types.str;
       default = "kyutai/stt-1b-en_fr-candle";
       description = "HuggingFace model repo for Kyutai STT.";
-    };
-
-    language = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = "Language hint for transcription. Null for auto-detect.";
     };
 
     serverPort = lib.mkOption {
@@ -91,14 +91,14 @@ in
     extraEnvironment = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = { };
-      description = "Extra environment variables to pass to the wl-whispr service.";
+      description = "Extra environment variables to pass to the wayland-stt service.";
     };
   };
 
   config = lib.mkIf cfg.enable {
     systemd.user.services.moshi-server = {
       Unit = {
-        Description = "Kyutai STT server for wl-whispr";
+        Description = "Kyutai STT server for wayland-stt";
         After = [ "graphical-session.target" ];
         PartOf = [ "graphical-session.target" ];
       };
@@ -115,9 +115,9 @@ in
       };
     };
 
-    systemd.user.services.wl-whispr = {
+    systemd.user.services.wayland-stt = {
       Unit = {
-        Description = "wl-whispr push-to-talk speech-to-text daemon";
+        Description = "wayland-stt push-to-talk speech-to-text daemon";
         After = [
           "graphical-session.target"
           "moshi-server.service"
@@ -128,12 +128,12 @@ in
 
       Service = {
         Type = "simple";
-        ExecStart = "${cfg.package}/bin/wl-whispr";
+        ExecStart = "${cfg.package}/bin/wayland-stt";
         Restart = "on-failure";
         RestartSec = 5;
         Environment =
           [
-            "WL_WHISPR_SERVER=ws://127.0.0.1:${toString cfg.serverPort}"
+            "WAYLAND_STT_SERVER=ws://127.0.0.1:${toString cfg.serverPort}"
           ]
           ++ lib.mapAttrsToList (name: value: "${name}=${value}") cfg.extraEnvironment;
       };
