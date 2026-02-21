@@ -82,11 +82,20 @@ The `moshi-server` package in the flake overrides `pkgs.moshi` from nixpkgs to f
 # flake.nix inputs:
 inputs.wayland-stt.url = "github:user/wayland-stt";
 
-# Home Manager (recommended — runs both services):
+# Home Manager — local server + client (default):
 imports = [ inputs.wayland-stt.homeManagerModules.default ];
 services.wayland-stt = {
   enable = true;
   cudaCapability = "8.6";  # "8.9" for RTX 4090, etc.
+  serverAddr = "0.0.0.0";  # optional: accept remote connections (e.g. Tailscale)
+};
+
+# Home Manager — remote client only (no local GPU):
+imports = [ inputs.wayland-stt.homeManagerModules.default ];
+services.wayland-stt = {
+  enable = true;
+  enableServer = false;          # no local moshi-server
+  serverUrl = "ws://eos:8098";   # connect to remote server over Tailscale
 };
 
 # NixOS (just adds packages to systemPackages):
@@ -106,12 +115,15 @@ binds {
 ## Home Manager Module Options
 
 Under `services.wayland-stt`:
-- `enable` — enable both systemd user services (moshi-server + wayland-stt)
+- `enable` — enable the wayland-stt client service (and moshi-server if `enableServer` is true)
+- `enableServer` — whether to run a local moshi-server (default: `true`). Set to `false` on machines without a GPU that connect to a remote server
 - `cudaCapability` — CUDA compute capability for moshi-server (default: `"8.6"`, e.g. `"8.9"` for RTX 4090)
+- `serverAddr` — address for moshi-server to bind to (default: `"127.0.0.1"`). Set to `"0.0.0.0"` to accept remote connections (e.g. over Tailscale)
+- `serverUrl` — WebSocket URL the client connects to (default: `"ws://127.0.0.1:${serverPort}"`). Override to point at a remote server (e.g. `"ws://eos:8098"`)
+- `serverPort` — port for moshi-server (default: `8098`)
 - `package` — the wayland-stt package (auto-provided, override for custom builds)
 - `moshiPackage` — the moshi-server package (auto-built from `cudaCapability`, override for custom builds)
 - `sttModel` — HuggingFace model repo (default: `"kyutai/stt-1b-en_fr-candle"`)
-- `serverPort` — port for moshi-server (default: `8098`)
 - `extraEnvironment` — extra environment variables (default: `{}`)
 
 ## Environment Variables

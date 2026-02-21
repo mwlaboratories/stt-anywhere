@@ -88,6 +88,24 @@ in
       description = "Port for the moshi-server to listen on.";
     };
 
+    enableServer = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Whether to run a local moshi-server. Set to false on machines without a GPU that connect to a remote server.";
+    };
+
+    serverAddr = lib.mkOption {
+      type = lib.types.str;
+      default = "127.0.0.1";
+      description = "Address for moshi-server to bind to. Set to \"0.0.0.0\" to accept connections from other machines (e.g. over Tailscale).";
+    };
+
+    serverUrl = lib.mkOption {
+      type = lib.types.str;
+      default = "ws://127.0.0.1:${toString cfg.serverPort}";
+      description = "WebSocket URL the wayland-stt client connects to. Override to point at a remote moshi-server (e.g. \"ws://eos:8098\").";
+    };
+
     extraEnvironment = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = { };
@@ -96,7 +114,7 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    systemd.user.services.moshi-server = {
+    systemd.user.services.moshi-server = lib.mkIf cfg.enableServer {
       Unit = {
         Description = "Kyutai STT server for wayland-stt";
         After = [ "graphical-session.target" ];
@@ -105,7 +123,7 @@ in
 
       Service = {
         Type = "simple";
-        ExecStart = "${lib.getExe' cfg.moshiPackage "moshi-server"} worker --config ${sttConfig} --port ${toString cfg.serverPort} --addr 127.0.0.1";
+        ExecStart = "${lib.getExe' cfg.moshiPackage "moshi-server"} worker --config ${sttConfig} --port ${toString cfg.serverPort} --addr ${cfg.serverAddr}";
         Restart = "on-failure";
         RestartSec = 5;
       };
@@ -118,12 +136,11 @@ in
     systemd.user.services.wayland-stt = {
       Unit = {
         Description = "wayland-stt push-to-talk speech-to-text daemon";
-        After = [
-          "graphical-session.target"
-          "moshi-server.service"
-        ];
+        After =
+          [ "graphical-session.target" ]
+          ++ lib.optionals cfg.enableServer [ "moshi-server.service" ];
         PartOf = [ "graphical-session.target" ];
-        Requires = [ "moshi-server.service" ];
+        Requires = lib.optionals cfg.enableServer [ "moshi-server.service" ];
       };
 
       Service = {
@@ -133,7 +150,7 @@ in
         RestartSec = 5;
         Environment =
           [
-            "WAYLAND_STT_SERVER=ws://127.0.0.1:${toString cfg.serverPort}"
+            "WAYLAND_STT_SERVER=${cfg.serverUrl}"
           ]
           ++ lib.mapAttrsToList (name: value: "${name}=${value}") cfg.extraEnvironment;
       };
