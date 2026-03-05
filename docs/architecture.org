@@ -1,0 +1,56 @@
+#+title: Architecture
+
+* Overview
+
+Two systemd user services connected over WebSocket:
+
+#+begin_example
+[moshi-server]                        [wayland-stt.py]
+(systemd service)                     (systemd service)
+Loads STT model in VRAM               Lightweight WebSocket client
+Listens ws://localhost:8098
+                                      SIGUSR1 →
+/api/asr-streaming ◄─── WebSocket ─── pw-record (24kHz f32 mono)
+    │                                         │
+    └── Word tokens ─── WebSocket ──► wtype (types each word live)
+                                      SIGUSR1 → stop
+                                      SIGUSR2 → toggle mic/system audio
+#+end_example
+
+- *moshi-server* — Rust binary (candle + CUDA), keeps the STT model in VRAM, runs inference on GPU
+- *wayland-stt* — lightweight Python client: records audio via PipeWire, streams MessagePack chunks over WebSocket, types each recognized word with =wtype=
+
+* Protocol
+
+- Audio captured at 24 kHz mono f32, sent in 80 ms chunks (1920 samples)
+- Chunks encoded as MessagePack and sent over WebSocket
+- Server returns word tokens as they are recognized
+- Latency from speech to typed text is ~500 ms
+- 1s silence preamble sent at accelerated pace (~0.25s wall time) for model warmup
+
+* Signal handling
+
+- =SIGUSR1= — toggle recording on/off
+- =SIGUSR2= — toggle between mic and system audio capture
+- Stop path: immediate notification, trailing silence sent in burst, smart drain (0.5s idle or 2s max)
+
+* File structure
+
+#+begin_example
+flake.nix              Flake: packages, modules, devShells
+wayland-stt.py         Python client (WebSocket, pw-record, wtype)
+nix/
+  package.nix          Package derivation (writeShellApplication wrapper)
+  hm-module.nix        Home Manager module (systemd services)
+  nixos-module.nix     NixOS module (systemPackages)
+#+end_example
+
+* Runtime dependencies
+
+** moshi-server
+
+Rust binary with CUDA (candle). Models downloaded from HuggingFace on first run (~2.4 GB for the 1B model).
+
+** wayland-stt client
+
+Python with =websockets= + =msgpack=, =wtype=, =libnotify=, =pipewire=, =wireplumber=. Packaged as a =writeShellApplication= wrapper with all dependencies on =PATH=.

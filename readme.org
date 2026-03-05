@@ -1,161 +1,120 @@
 #+title: wayland-stt
-#+description: Local push-to-talk streaming speech-to-text for Wayland
+#+description: Talk anywhere. Words appear at your cursor.
 
-Local push-to-talk streaming speech-to-text daemon for Wayland. Streams audio to a [[https://github.com/kyutai-labs/moshi][Kyutai STT]] server via WebSocket and types words live as they're recognized. Works on any Wayland compositor (niri, Hyprland, Sway, COSMIC, etc.).
-
-Bind a key, hold to talk, release — words appear at your cursor in real time.
-
-* How it works
+[[https://github.com/kyutai-labs/moshi][Kyutai STT]] powered push-to-talk for Wayland. Hold a key, speak, release — words stream into any text field in real time. ~500 ms latency. Runs entirely on your hardware.
 
 #+begin_example
-keybind → SIGUSR1 → pw-record → moshi-server (CUDA) → wtype (live typing)
+  hold key → speak → words appear live ✦ no cloud, no subscription, no latency
 #+end_example
 
-Two systemd user services:
+* Why
+
+Every other speech-to-text tool either sends your audio to a server you don't control, or transcribes in batch after you're done talking. wayland-stt does neither. It streams words as you speak, locally, on your GPU.
+
+- *Real-time* — words appear while you're still talking
+- *Private* — audio never leaves your machine or network
+- *Native Wayland* — works on niri, Hyprland, Sway, COSMIC, and any wlroots-based compositor
+- *Set and forget* — systemd services start with your session
+
+* Client / Server
+
+wayland-stt separates the heavy GPU inference from the lightweight client. One beefy machine can serve your entire network.
 
 #+begin_example
-[moshi-server]                        [wayland-stt.py]
-(systemd service)                     (systemd service)
-Loads STT model in VRAM               Lightweight WebSocket client
-Listens ws://localhost:8098
-                                      SIGUSR1 →
-/api/asr-streaming ◄─── WebSocket ─── pw-record (24kHz f32 mono)
-    │                                         │
-    └── Word tokens ─── WebSocket ──► wtype (types each word live)
-                                      SIGUSR1 → stop
-                                      SIGUSR2 → toggle mic/system audio
+┌─────────────────────────────┐         ┌─────────────────────────────┐
+│  desktop / laptop / phone   │         │      GPU workstation        │
+│                             │   ws    │                             │
+│  mic → wayland-stt ─────────┼────────►│  moshi-server (CUDA)        │
+│       (records + types)     │◄────────┼─── word tokens              │
+│                             │ tailscale│  model in VRAM (~2.4 GB)   │
+└─────────────────────────────┘         └─────────────────────────────┘
+       any Wayland device                   one NVIDIA GPU is enough
 #+end_example
 
-- *moshi-server* — Rust binary (candle + CUDA), keeps the STT model in VRAM, runs inference on GPU
-- *wayland-stt* — lightweight Python client: records audio via PipeWire, streams MessagePack chunks over WebSocket, types each recognized word with =wtype=
-- Audio is captured at 24 kHz mono f32, sent in 80 ms chunks (1920 samples)
-- Latency from speech to typed text is ~500 ms
-- Desktop notifications via =notify-send= for status updates
+** Single machine (GPU + client together)
 
-* Requirements
+#+begin_src nix
+services.wayland-stt = {
+  enable = true;
+  cudaCapability = "8.6";  # RTX 3060-3090
+};
+#+end_src
 
-- NixOS (flake-based)
-- NVIDIA GPU with CUDA support
-- Wayland compositor
-- PipeWire (for audio capture)
+** Server (GPU machine, shared on your network)
 
-* Installation
+#+begin_src nix
+services.wayland-stt = {
+  enable = true;
+  cudaCapability = "8.6";
+  serverAddr = "0.0.0.0";  # accept connections over Tailscale
+};
+#+end_src
 
-** Home Manager (recommended)
+** Client (any machine, no GPU needed)
 
-Runs both =moshi-server= and =wayland-stt= as systemd user services.
+#+begin_src nix
+services.wayland-stt = {
+  enable = true;
+  enableServer = false;
+  serverUrl = "ws://workstation:8098";  # point at your GPU machine
+};
+#+end_src
+
+* Quick start
+
+Add the flake input and import the Home Manager module:
 
 #+begin_src nix
 # flake.nix
 {
   inputs.wayland-stt.url = "github:user/wayland-stt";
 
-  # ... in your home-manager config:
+  # in your home-manager config:
   imports = [ inputs.wayland-stt.homeManagerModules.default ];
 
   services.wayland-stt = {
     enable = true;
-    cudaCapability = "8.6";  # see table below
-    language = "en";
+    cudaCapability = "8.6";
   };
 }
 #+end_src
 
-** NixOS module
-
-Just adds the packages to =environment.systemPackages= — you manage the services yourself.
-
-#+begin_src nix
-imports = [ inputs.wayland-stt.nixosModules.default ];
-programs.wayland-stt.enable = true;
-#+end_src
-
-** CUDA capability
-
-Set =cudaCapability= to match your GPU:
-
-| GPU            | Capability |
-|----------------+------------|
-| RTX 3060–3090  | ="8.6"=    |
-| RTX 4060–4090  | ="8.9"=    |
-| RTX 5070–5090  | ="10.0"=   |
-
-The model (~2.4 GB) is downloaded from HuggingFace on first run.
-
-* Keybinds
-
-Send =SIGUSR1= to toggle recording, =SIGUSR2= to switch between mic and system audio capture.
-
-** niri
+Rebuild, bind a key to toggle recording, done:
 
 #+begin_src kdl
+// niri
 binds {
     Mod+V       { spawn "systemctl" "--user" "kill" "-s" "USR1" "wayland-stt.service"; }
     Mod+Shift+V { spawn "systemctl" "--user" "kill" "-s" "USR2" "wayland-stt.service"; }
 }
 #+end_src
 
-** Hyprland
+The model (~2.4 GB) downloads from HuggingFace on first run.
 
-#+begin_src conf
-bind = SUPER, V, exec, systemctl --user kill -s USR1 wayland-stt.service
-bind = SUPER SHIFT, V, exec, systemctl --user kill -s USR2 wayland-stt.service
-#+end_src
+* Requirements
 
-** Sway
+** Server (runs inference)
 
-#+begin_src conf
-bindsym $mod+v exec systemctl --user kill -s USR1 wayland-stt.service
-bindsym $mod+Shift+v exec systemctl --user kill -s USR2 wayland-stt.service
-#+end_src
+- NVIDIA GPU with CUDA
+- NixOS (flake-based)
 
-* Configuration
+** Client (records + types)
 
-** Home Manager options
+- Wayland compositor
+- PipeWire
+- NixOS (flake-based)
+- No GPU needed when connecting to a remote server
 
-All options live under =services.wayland-stt=:
+* CUDA capability
 
-| Option              | Type          | Default                             | Description                                          |
-|---------------------+---------------+-------------------------------------+------------------------------------------------------|
-| =enable=            | bool          |                                     | Enable both systemd user services                    |
-| =cudaCapability=    | string        | ="8.6"=                             | CUDA compute capability for moshi-server             |
-| =language=          | null or string | =null=                              | Language hint (=null= for auto-detect)               |
-| =sttModel=          | string        | ="kyutai/stt-1b-en_fr-candle"=      | HuggingFace model repo                               |
-| =serverPort=        | port          | =8098=                              | Port for moshi-server                                |
-| =extraEnvironment=  | attrs of string | ={}=                              | Extra env vars for the wayland-stt service             |
-| =package=           | package       | /auto/                              | Override the wayland-stt client package                |
-| =moshiPackage=      | package       | /auto (built from cudaCapability)/  | Override the moshi-server package                    |
+| GPU            | Capability |
+|----------------+------------|
+| RTX 3060-3090  | ="8.6"=    |
+| RTX 4060-4090  | ="8.9"=    |
+| RTX 5070-5090  | ="10.0"=   |
 
-** Environment variables
+* Documentation
 
-These can be set via =extraEnvironment= or in the shell when running standalone:
-
-| Variable              | Default                      | Description                           |
-|-----------------------+------------------------------+---------------------------------------|
-| =WAYLAND_STT_SERVER=    | =ws://127.0.0.1:8098=        | WebSocket URL for moshi-server        |
-| =WAYLAND_STT_API_KEY=   | =public_token=                | API key for moshi-server auth         |
-| =WAYLAND_STT_TARGET=    | /empty (default mic)/        | PipeWire node id/name to capture from |
-
-* Development
-
-#+begin_src sh
-nix develop                # dev shell with all dependencies
-nix build                  # build the wayland-stt client
-nix build .#moshi-server   # build moshi-server with CUDA
-nix flake check            # verify the flake
-#+end_src
-
-* Architecture
-
-#+begin_example
-flake.nix              Flake: packages, modules, devShells
-wayland-stt.py           Python client (WebSocket, pw-record, wtype)
-nix/
-  package.nix          Package derivation (writeShellApplication wrapper)
-  hm-module.nix        Home Manager module (systemd services)
-  nixos-module.nix     NixOS module (systemPackages)
-#+end_example
-
-The flake exports two packages (=default= for the client, =moshi-server= for the STT server) and two modules. The Home Manager module is the primary integration point — it sets up both systemd services with the correct wiring, builds =moshi-server= with your GPU's CUDA capability, and manages the STT config file.
-
-The client is a =writeShellApplication= wrapper around =wayland-stt.py= with runtime dependencies (Python + websockets/msgpack, wtype, libnotify, pipewire, wireplumber) on =PATH=.
+- [[file:docs/configuration.org][Configuration]] — all Home Manager options, environment variables, keybinds for every compositor
+- [[file:docs/architecture.org][Architecture]] — how the pieces fit together, protocol details, file structure
+- [[file:docs/development.org][Development]] — building, hacking, deploying changes
