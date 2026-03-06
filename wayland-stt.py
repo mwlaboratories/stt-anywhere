@@ -55,8 +55,12 @@ def notify(message, urgency="normal"):
     )
 
 
-def type_text(text):
-    subprocess.run(["wtype", "--", text], check=False)
+def type_text(text, prepend_space=False):
+    cmd = ["wtype"]
+    if prepend_space:
+        cmd += ["-k", "space"]
+    cmd += ["--", text]
+    subprocess.run(cmd, check=False)
 
 
 async def stream_session(stop_event, capture_system_audio):
@@ -147,10 +151,7 @@ async def stream_session(stop_event, capture_system_audio):
                                 print(f"WORD: '{text}'", flush=True)
                                 last_word_time = time.monotonic()
                                 if text:
-                                    if words:
-                                        type_text(" " + text)
-                                    else:
-                                        type_text(text)
+                                    type_text(text, prepend_space=bool(words))
                                     words.append(text)
                             elif t not in ("Step", "Ready", "EndWord"):
                                 print(f"MSG: {data}", flush=True)
