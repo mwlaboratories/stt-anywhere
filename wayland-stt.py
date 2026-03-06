@@ -147,10 +147,7 @@ async def stream_session(stop_event, capture_system_audio):
                                 print(f"WORD: '{text}'", flush=True)
                                 last_word_time = time.monotonic()
                                 if text:
-                                    if words:
-                                        type_text(" " + text)
-                                    else:
-                                        type_text(text)
+                                    type_text(text + " ")
                                     words.append(text)
                             elif t not in ("Step", "Ready", "EndWord"):
                                 print(f"MSG: {data}", flush=True)
