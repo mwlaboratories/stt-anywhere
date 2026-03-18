@@ -106,6 +106,18 @@ in
       description = "WebSocket URL the wayland-stt client connects to. Override to point at a remote moshi-server (e.g. \"ws://eos:8098\").";
     };
 
+    relayPort = lib.mkOption {
+      type = lib.types.port;
+      default = 0;
+      description = "Port for the WebSocket relay server (accepts remote STT clients like Even glasses). 0 = disabled.";
+    };
+
+    relayAddr = lib.mkOption {
+      type = lib.types.str;
+      default = "0.0.0.0";
+      description = "Address for the relay server to bind to.";
+    };
+
     extraEnvironment = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = { };
@@ -151,6 +163,8 @@ in
         Environment =
           [
             "WAYLAND_STT_SERVER=${cfg.serverUrl}"
+            "WAYLAND_STT_RELAY_PORT=${toString cfg.relayPort}"
+            "WAYLAND_STT_RELAY_ADDR=${cfg.relayAddr}"
           ]
           ++ lib.mapAttrsToList (name: value: "${name}=${value}") cfg.extraEnvironment;
       };

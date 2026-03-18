@@ -2,27 +2,34 @@
 
 Streams audio to a Kyutai STT server via WebSocket and types words live via wtype.
 Pipeline: keybind -> SIGUSR1 -> pw-record -> moshi-server (CUDA) -> wtype
+
+Optional relay server: accepts WebSocket clients (e.g. Even glasses browser app),
+relays their audio to moshi-server, and returns transcription results as JSON.
 """
 
 import asyncio
+import json
 import os
 import signal
 import struct
 import subprocess
 import sys
 import time
-
 import msgpack
 import websockets
 
 SERVER_URL = os.environ.get("WAYLAND_STT_SERVER", "ws://127.0.0.1:8098")
 API_KEY = os.environ.get("WAYLAND_STT_API_KEY", "public_token")
 AUDIO_TARGET = os.environ.get("WAYLAND_STT_TARGET", "")  # PipeWire node id/name, empty = default
+RELAY_PORT = int(os.environ.get("WAYLAND_STT_RELAY_PORT", "0"))  # 0 = disabled
+RELAY_ADDR = os.environ.get("WAYLAND_STT_RELAY_ADDR", "0.0.0.0")
 
 SAMPLE_RATE = 24000
 CHANNELS = 1
 CHUNK_SAMPLES = 1920  # 80ms at 24kHz
 CHUNK_BYTES = CHUNK_SAMPLES * 4  # f32 = 4 bytes per sample
+PREAMBLE_CHUNKS = SAMPLE_RATE // CHUNK_SAMPLES  # ~1s
+TRAILING_CHUNKS = 3 * SAMPLE_RATE // CHUNK_SAMPLES  # ~3s
 
 
 def get_default_sink():
@@ -206,6 +213,91 @@ async def stream_session(stop_event, capture_system_audio):
         notify("No speech detected", urgency="low")
 
 
+async def relay_client(client_ws):
+    """Handle one relay client: bridge between browser WebSocket and moshi-server."""
+    moshi_url = f"{SERVER_URL}/api/asr-streaming?auth_id={API_KEY}"
+    print(f"[relay] Client connected, relaying to {SERVER_URL}", flush=True)
+
+    try:
+        async with websockets.connect(moshi_url) as moshi_ws:
+            # Send preamble silence to moshi
+            silence_msg = msgpack.packb(
+                {"type": "Audio", "pcm": [0.0] * CHUNK_SAMPLES},
+                use_single_float=True,
+            )
+            for _ in range(PREAMBLE_CHUNKS):
+                await moshi_ws.send(silence_msg)
+            print("[relay] Preamble sent", flush=True)
+
+            await client_ws.send(json.dumps({"type": "ready"}))
+
+            async def forward_audio():
+                """Client binary f32 PCM -> msgpack -> moshi."""
+                try:
+                    async for message in client_ws:
+                        if isinstance(message, bytes):
+                            n_floats = len(message) // 4
+                            if n_floats == 0:
+                                continue
+                            samples = struct.unpack(f"<{n_floats}f", message[:n_floats * 4])
+                            msg = msgpack.packb(
+                                {"type": "Audio", "pcm": samples},
+                                use_single_float=True,
+                            )
+                            await moshi_ws.send(msg)
+                except websockets.exceptions.ConnectionClosed:
+                    pass
+
+            async def forward_words():
+                """Moshi msgpack responses -> JSON -> client."""
+                try:
+                    async for message in moshi_ws:
+                        data = msgpack.unpackb(message, raw=False)
+                        if isinstance(data, dict):
+                            await client_ws.send(json.dumps(data))
+                except websockets.exceptions.ConnectionClosed:
+                    pass
+
+            audio_task = asyncio.create_task(forward_audio())
+            words_task = asyncio.create_task(forward_words())
+
+            # Wait for client to disconnect (audio_task finishes)
+            await audio_task
+
+            # Send trailing silence burst so moshi flushes
+            for _ in range(TRAILING_CHUNKS):
+                await moshi_ws.send(silence_msg)
+
+            # Drain: wait for final words (max 2s, stop if silent for 0.5s)
+            drain_start = time.monotonic()
+            while time.monotonic() - drain_start < 2.0:
+                await asyncio.sleep(0.05)
+
+            await moshi_ws.close()
+            words_task.cancel()
+            try:
+                await words_task
+            except asyncio.CancelledError:
+                pass
+
+    except Exception as e:
+        print(f"[relay] Error: {e}", flush=True)
+        try:
+            await client_ws.send(json.dumps({"type": "error", "text": str(e)}))
+        except Exception:
+            pass
+
+    print("[relay] Client disconnected", flush=True)
+
+
+async def run_relay_server():
+    """Start the WebSocket relay server for remote STT clients."""
+    print(f"[relay] Listening on ws://{RELAY_ADDR}:{RELAY_PORT}", flush=True)
+
+    async with websockets.serve(relay_client, RELAY_ADDR, RELAY_PORT):
+        await asyncio.Future()  # run forever
+
+
 async def main():
     loop = asyncio.get_event_loop()
 
@@ -220,8 +312,13 @@ async def main():
 
     loop.add_signal_handler(signal.SIGUSR2, toggle_source)
 
+    # Start relay server if configured
+    if RELAY_PORT:
+        asyncio.create_task(run_relay_server())
+
     notify("Ready (mic)")
-    print(f"Ready. Server: {SERVER_URL}")
+    relay_info = f" | Relay: ws://{RELAY_ADDR}:{RELAY_PORT}" if RELAY_PORT else ""
+    print(f"Ready. Server: {SERVER_URL}{relay_info}")
     print("SIGUSR1: toggle recording | SIGUSR2: toggle mic/system audio")
 
     toggled = asyncio.Event()
