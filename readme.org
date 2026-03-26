@@ -80,8 +80,8 @@ Rebuild, bind a key to toggle recording, done:
 #+begin_src kdl
 // niri
 binds {
-    Mod+Space   { spawn "systemctl" "--user" "kill" "-s" "USR1" "stt-anywhere.service"; }
-    Mod+Shift+V { spawn "systemctl" "--user" "kill" "-s" "USR2" "stt-anywhere.service"; }
+    Mod+Space { spawn "systemctl" "--user" "kill" "-s" "USR1" "stt-anywhere.service"; } // toggle recording
+    Mod+T     { spawn "sh" "-c" "if systemctl --user is-active --quiet stt-anywhere.service; then systemctl --user stop stt-anywhere.service && notify-send 'stt-anywhere' 'Stopped'; else systemctl --user start stt-anywhere.service && notify-send 'stt-anywhere' 'Started'; fi"; } // start/stop service
 }
 #+end_src
 
