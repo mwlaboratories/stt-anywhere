@@ -140,8 +140,3 @@ services.stt-anywhere = {
 | RTX 4060-4090  | ="8.9"=    |
 | RTX 5070-5090  | ="10.0"=   |
 
-* Documentation
-
-- [[file:docs/configuration.org][Configuration]] : all Home Manager options, environment variables, keybinds for every compositor
-- [[file:docs/architecture.org][Architecture]] : how the pieces fit together, protocol details, file structure
-- [[file:docs/development.org][Development]] : building, hacking, deploying changes
