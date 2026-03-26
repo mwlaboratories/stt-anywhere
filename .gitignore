@@ -10,3 +10,5 @@ result
 *.pth
 *.ckpt
 models/
+
+CLAUDE.md
