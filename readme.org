@@ -1,64 +1,61 @@
 #+title: stt-anywhere
-#+description: Talk anywhere. Words appear at your cursor.
+#+description: Speech-to-text anywhere — desktop, AR glasses, any device.
 
-[[https://github.com/kyutai-labs/moshi][Kyutai STT]] powered push-to-talk for Wayland. Hold a key, speak, release — words stream into any text field in real time. ~500 ms latency. Runs entirely on your hardware.
+[[https://github.com/kyutai-labs/moshi][Kyutai STT]] powered speech-to-text service. Streams words in real time from any device on your network — Wayland desktops via push-to-talk, AR glasses via WebSocket relay. Runs entirely on your hardware.
 
 #+begin_example
-  hold key → speak → words appear live ✦ no cloud, no subscription, no latency
+  speak → words appear live ✦ no cloud, no subscription, no latency
 #+end_example
+
+* How it works
+
+#+begin_example
+┌─────────────────────────────────────────────────┐
+│  GPU workstation (always on)                    │
+│                                                 │
+│  stt-anywhere.py (one systemd service)          │
+│  ├── push-to-talk    keyboard → wtype (local)   │
+│  ├── :8099/stt       WebSocket relay (remote)   │
+│  ├── :8099/api/discord  Discord proxy (remote)  │
+│  │                                              │
+│  │         both send audio to:                  │
+│  │                ▼                             │
+│  │   moshi-server :8098 (CUDA)                  │
+│  │   audio ──► text (~500ms latency)            │
+│  │   model in VRAM (~2.4 GB)                    │
+│  └──────────────────────────────────────────────│
+└────────────────────────┬────────────────────────┘
+                         │
+          Tailscale / LAN (your network)
+                         │
+       ┌─────────────────┼─────────────────┐
+       │                 │                 │
+       ▼                 ▼                 ▼
+┌─────────────┐  ┌──────────────┐  ┌─────────────┐
+│   Desktop   │  │  AR Glasses  │  │   Laptop    │
+│   (Wayland) │  │ (Even Hub)   │  │  (Wayland)  │
+│             │  │              │  │             │
+│  Mod+Space  │  │  deltaclaw   │  │  Mod+Space  │
+│  to record  │  │  web app     │  │  to record  │
+│  wtype to   │  │  tap to talk │  │  wtype to   │
+│  cursor     │  │  voice msgs  │  │  cursor     │
+└─────────────┘  └──────────────┘  └─────────────┘
+#+end_example
+
+** Wayland push-to-talk
+
+Press a key, speak, release. Words stream into whatever text field has focus via =wtype=. Works on niri, Hyprland, Sway, COSMIC, and any wlroots-based compositor.
+
+** AR glasses relay
+
+The relay server accepts WebSocket audio from remote clients (e.g. [[https://github.com/mwlaboratories/deltaclaw][deltaclaw]] on Even Hub glasses) and returns transcribed words as JSON. Also proxies Discord API calls so the glasses app can browse channels and send messages by voice.
 
 * Why
 
-Every other speech-to-text tool either sends your audio to a server you don't control, or transcribes in batch after you're done talking. stt-anywhere does neither. It streams words as you speak, locally, on your GPU.
-
 - *Real-time* — words appear while you're still talking
 - *Private* — audio never leaves your machine or network
-- *Native Wayland* — works on niri, Hyprland, Sway, COSMIC, and any wlroots-based compositor
+- *Multi-device* — one GPU serves desktops, laptops, glasses, anything
 - *Set and forget* — systemd services start with your session
-
-* Client / Server
-
-stt-anywhere separates the heavy GPU inference from the lightweight client. One beefy machine can serve your entire network.
-
-#+begin_example
-┌─────────────────────────────┐         ┌─────────────────────────────┐
-│  desktop / laptop / phone   │         │      GPU workstation        │
-│                             │   ws    │                             │
-│  mic → stt-anywhere ─────────┼────────►│  moshi-server (CUDA)        │
-│       (records + types)     │◄────────┼─── word tokens              │
-│                             │ tailscale│  model in VRAM (~2.4 GB)   │
-└─────────────────────────────┘         └─────────────────────────────┘
-       any Wayland device                   one NVIDIA GPU is enough
-#+end_example
-
-** Single machine (GPU + client together)
-
-#+begin_src nix
-services.stt-anywhere = {
-  enable = true;
-  cudaCapability = "8.6";  # RTX 3060-3090
-};
-#+end_src
-
-** Server (GPU machine, shared on your network)
-
-#+begin_src nix
-services.stt-anywhere = {
-  enable = true;
-  cudaCapability = "8.6";
-  serverAddr = "0.0.0.0";  # accept connections over Tailscale
-};
-#+end_src
-
-** Client (any machine, no GPU needed)
-
-#+begin_src nix
-services.stt-anywhere = {
-  enable = true;
-  enableServer = false;
-  serverUrl = "ws://workstation:8098";  # point at your GPU machine
-};
-#+end_src
 
 * Quick start
 
@@ -67,14 +64,14 @@ Add the flake input and import the Home Manager module:
 #+begin_src nix
 # flake.nix
 {
-  inputs.stt-anywhere.url = "github:user/stt-anywhere";
+  inputs.stt-anywhere.url = "github:mwlaboratories/stt-anywhere";
 
   # in your home-manager config:
   imports = [ inputs.stt-anywhere.homeManagerModules.default ];
 
   services.stt-anywhere = {
     enable = true;
-    cudaCapability = "8.6";
+    cudaCapability = "8.6";  # RTX 3060-3090
   };
 }
 #+end_src
@@ -84,12 +81,66 @@ Rebuild, bind a key to toggle recording, done:
 #+begin_src kdl
 // niri
 binds {
-    Mod+V       { spawn "systemctl" "--user" "kill" "-s" "USR1" "stt-anywhere.service"; }
+    Mod+Space   { spawn "systemctl" "--user" "kill" "-s" "USR1" "stt-anywhere.service"; }
     Mod+Shift+V { spawn "systemctl" "--user" "kill" "-s" "USR2" "stt-anywhere.service"; }
 }
 #+end_src
 
 The model (~2.4 GB) downloads from HuggingFace on first run.
+
+* Configuration examples
+
+** Single machine (GPU + client together)
+
+#+begin_src nix
+services.stt-anywhere = {
+  enable = true;
+  cudaCapability = "8.6";
+};
+#+end_src
+
+** GPU server (shared on your network)
+
+#+begin_src nix
+services.stt-anywhere = {
+  enable = true;
+  cudaCapability = "8.6";
+  serverAddr = "0.0.0.0";       # accept moshi connections over Tailscale
+  relayPort = 8099;              # WebSocket relay + Discord proxy for glasses
+  discordGuildId = "123456789";  # Discord server ID
+  discordTokenFile = "/run/secrets/discord-token";  # bot token
+};
+#+end_src
+
+** Client (laptop, no GPU)
+
+#+begin_src nix
+services.stt-anywhere = {
+  enable = true;
+  enableServer = false;
+  serverUrl = "ws://workstation:8098";
+};
+#+end_src
+
+* Discord proxy
+
+When =discordTokenFile= and =discordGuildId= are set, the relay server exposes a Discord API proxy:
+
+| Endpoint                                  | Method | Description        |
+|-------------------------------------------+--------+--------------------|
+| =/api/discord/channels=                   | GET    | List text channels |
+| =/api/discord/channels/:id/messages=      | GET    | Fetch messages     |
+| =/api/discord/channels/:id/messages=      | POST   | Send a message     |
+
+The bot token stays on your server — clients never see it.
+
+** Setting up the Discord bot
+
+1. [[https://discord.com/developers/applications][Discord Developer Portal]] — New Application — name it "deltaclaw"
+2. Bot tab — Reset Token — save the token
+3. OAuth2 — URL Generator — select =bot= scope + =Send Messages= + =Read Message History=
+4. Open the generated URL to invite the bot to your server
+5. Right-click your server name — Copy Server ID (enable Developer Mode in Discord settings first)
 
 * Requirements
 
@@ -100,8 +151,7 @@ The model (~2.4 GB) downloads from HuggingFace on first run.
 
 ** Client (records + types)
 
-- Wayland compositor
-- PipeWire
+- Wayland compositor + PipeWire
 - NixOS (flake-based)
 - No GPU needed when connecting to a remote server
 

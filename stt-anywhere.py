@@ -10,19 +10,26 @@ relays their audio to moshi-server, and returns transcription results as JSON.
 import asyncio
 import json
 import os
+import re
 import signal
 import struct
 import subprocess
 import sys
 import time
+import urllib.request
+import urllib.error
 import msgpack
 import websockets
+from http import HTTPStatus
 
 SERVER_URL = os.environ.get("STT_ANYWHERE_SERVER", "ws://127.0.0.1:8098")
 API_KEY = os.environ.get("STT_ANYWHERE_API_KEY", "public_token")
 AUDIO_TARGET = os.environ.get("STT_ANYWHERE_TARGET", "")  # PipeWire node id/name, empty = default
 RELAY_PORT = int(os.environ.get("STT_ANYWHERE_RELAY_PORT", "0"))  # 0 = disabled
 RELAY_ADDR = os.environ.get("STT_ANYWHERE_RELAY_ADDR", "0.0.0.0")
+DISCORD_TOKEN = os.environ.get("STT_ANYWHERE_DISCORD_TOKEN", "")
+DISCORD_GUILD_ID = os.environ.get("STT_ANYWHERE_DISCORD_GUILD_ID", "")
+DISCORD_AUTH = os.environ.get("STT_ANYWHERE_DISCORD_AUTH", "bot")  # "bot" or "user"
 
 SAMPLE_RATE = 24000
 CHANNELS = 1
@@ -290,11 +297,123 @@ async def relay_client(client_ws):
     print("[relay] Client disconnected", flush=True)
 
 
-async def run_relay_server():
-    """Start the WebSocket relay server for remote STT clients."""
-    print(f"[relay] Listening on ws://{RELAY_ADDR}:{RELAY_PORT}", flush=True)
+DISCORD_API = "https://discord.com/api/v10"
 
-    async with websockets.serve(relay_client, RELAY_ADDR, RELAY_PORT):
+
+def discord_headers():
+    prefix = "Bot " if DISCORD_AUTH == "bot" else ""
+    return {
+        "Authorization": f"{prefix}{DISCORD_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+
+def discord_fetch(path, method="GET", body=None):
+    """Make a request to the Discord API. Returns (status, json_body)."""
+    url = f"{DISCORD_API}{path}"
+    data = json.dumps(body).encode() if body else None
+    req = urllib.request.Request(url, data=data, headers=discord_headers(), method=method)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        return e.code, {"error": e.read().decode()}
+
+
+def handle_discord_request(full_path):
+    """Route a Discord API proxy request. Returns (status, json_body)."""
+    path = full_path.split("?")[0]
+
+    # GET /api/discord/channels
+    if path == "/api/discord/channels" and DISCORD_GUILD_ID:
+        status, data = discord_fetch(f"/guilds/{DISCORD_GUILD_ID}/channels")
+        if status != 200:
+            return status, data
+        channels = [
+            {"id": ch["id"], "name": ch["name"], "position": ch["position"]}
+            for ch in data if ch.get("type") == 0
+        ]
+        channels.sort(key=lambda c: c["position"])
+        return 200, channels
+
+    # GET /api/discord/channels/:id/messages?limit=N
+    m = re.match(r"^/api/discord/channels/(\d+)/messages", path)
+    if m:
+        channel_id = m.group(1)
+        qs = full_path.split("?", 1)[1] if "?" in full_path else "limit=50"
+        return discord_fetch(f"/channels/{channel_id}/messages?{qs}")
+
+    return 404, {"error": "not found"}
+
+
+def handle_discord_post(path, body):
+    """Route a Discord API POST request. Returns (status, json_body)."""
+    m = re.match(r"^/api/discord/channels/(\d+)/messages$", path)
+    if m:
+        channel_id = m.group(1)
+        return discord_fetch(f"/channels/{channel_id}/messages", method="POST", body=body)
+    return 404, {"error": "not found"}
+
+
+def json_response(status, data, extra_headers=None):
+    """Build an HTTP response tuple for websockets process_request."""
+    headers = [("Content-Type", "application/json"), ("Access-Control-Allow-Origin", "*")]
+    if extra_headers:
+        headers.extend(extra_headers)
+    http_status = HTTPStatus(status) if status in {v.value for v in HTTPStatus} else HTTPStatus.OK
+    return http_status, headers, json.dumps(data).encode()
+
+
+async def process_http_request(connection, request):
+    """Handle HTTP requests (Discord proxy); return None to proceed with WebSocket."""
+    path = request.path.split("?")[0]  # strip query string for routing
+
+    # Health check
+    if path == "/health":
+        return json_response(200, {"status": "ok"})
+
+    # CORS preflight
+    if request.method == "OPTIONS":
+        return (
+            HTTPStatus.NO_CONTENT,
+            [
+                ("Access-Control-Allow-Origin", "*"),
+                ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+                ("Access-Control-Allow-Headers", "Content-Type"),
+            ],
+            b"",
+        )
+
+    # Discord proxy routes
+    if path.startswith("/api/discord/"):
+        if not DISCORD_TOKEN:
+            return json_response(503, {"error": "STT_ANYWHERE_DISCORD_TOKEN not set"})
+
+        if request.method == "POST":
+            body = request.body
+            post_data = json.loads(body) if body else {}
+            status, data = handle_discord_post(path, post_data)
+        else:
+            status, data = handle_discord_request(request.path)
+
+        return json_response(status, data)
+
+    # Not an HTTP route — let websockets handle the upgrade
+    return None
+
+
+async def run_relay_server():
+    """Start the relay server: WebSocket for STT, HTTP for Discord proxy."""
+    print(f"[relay] Listening on {RELAY_ADDR}:{RELAY_PORT}", flush=True)
+    if DISCORD_TOKEN:
+        print(f"[relay] Discord proxy enabled for guild {DISCORD_GUILD_ID}", flush=True)
+
+    async with websockets.serve(
+        relay_client,
+        RELAY_ADDR,
+        RELAY_PORT,
+        process_request=process_http_request,
+    ):
         await asyncio.Future()  # run forever
 
 

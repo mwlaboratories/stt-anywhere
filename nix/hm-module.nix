@@ -118,6 +118,24 @@ in
       description = "Address for the relay server to bind to.";
     };
 
+    discordTokenFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = "Path to a file containing the Discord bot token. Loaded via LoadCredential for security.";
+    };
+
+    discordGuildId = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      description = "Discord guild (server) ID for the proxy.";
+    };
+
+    discordAuth = lib.mkOption {
+      type = lib.types.enum [ "bot" "user" ];
+      default = "bot";
+      description = "Discord authentication type.";
+    };
+
     extraEnvironment = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = { };
@@ -165,8 +183,11 @@ in
             "STT_ANYWHERE_SERVER=${cfg.serverUrl}"
             "STT_ANYWHERE_RELAY_PORT=${toString cfg.relayPort}"
             "STT_ANYWHERE_RELAY_ADDR=${cfg.relayAddr}"
+            "STT_ANYWHERE_DISCORD_GUILD_ID=${cfg.discordGuildId}"
+            "STT_ANYWHERE_DISCORD_AUTH=${cfg.discordAuth}"
           ]
           ++ lib.mapAttrsToList (name: value: "${name}=${value}") cfg.extraEnvironment;
+        EnvironmentFile = lib.mkIf (cfg.discordTokenFile != null) cfg.discordTokenFile;
       };
 
       Install = {
