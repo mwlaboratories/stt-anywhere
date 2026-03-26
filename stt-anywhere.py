@@ -9,6 +9,7 @@ relays their audio to moshi-server, and returns transcription results as JSON.
 
 import asyncio
 import json
+import math
 import os
 import signal
 import struct
@@ -213,10 +214,17 @@ async def stream_session(stop_event, capture_system_audio):
         notify("No speech detected", urgency="low")
 
 
+_relay_client_id = 0
+
 async def relay_client(client_ws):
     """Handle one relay client: bridge between browser WebSocket and moshi-server."""
+    global _relay_client_id
+    _relay_client_id += 1
+    cid = _relay_client_id
+    remote = client_ws.remote_address
+    tag = f"[relay#{cid} {remote[0]}:{remote[1]}]"
     moshi_url = f"{SERVER_URL}/api/asr-streaming?auth_id={API_KEY}"
-    print(f"[relay] Client connected, relaying to {SERVER_URL}", flush=True)
+    print(f"{tag} Client connected, relaying to {SERVER_URL}", flush=True)
 
     moshi_ws = None
     try:
@@ -229,25 +237,36 @@ async def relay_client(client_ws):
         )
         for _ in range(PREAMBLE_CHUNKS):
             await moshi_ws.send(silence_msg)
-        print("[relay] Preamble sent", flush=True)
+        print(f"{tag} Preamble sent", flush=True)
 
         await client_ws.send(json.dumps({"type": "ready"}))
 
         async def forward_audio():
             """Client binary f32 PCM -> msgpack -> moshi."""
             chunks = 0
+            bad_chunks = 0
             try:
                 async for message in client_ws:
                     if isinstance(message, bytes):
                         n_floats = len(message) // 4
                         if n_floats == 0:
                             continue
+                        samples = struct.unpack(f"<{n_floats}f", message[:n_floats * 4])
+                        # Validate audio: reject if NaN/inf or absurd values (not f32 PCM)
+                        peak = max(abs(s) for s in samples) if samples else 0
+                        if math.isnan(peak) or math.isinf(peak) or peak > 10.0:
+                            bad_chunks += 1
+                            if bad_chunks == 1:
+                                print(f"{tag} Bad audio rejected: {len(message)} bytes, {n_floats} floats, peak={peak} — wrong format?", flush=True)
+                                try:
+                                    await client_ws.send(json.dumps({"type": "error", "text": "Bad audio format: expected f32 PCM, peak out of range"}))
+                                except Exception:
+                                    pass
+                            continue
                         if chunks == 0:
-                            samples = struct.unpack(f"<{n_floats}f", message[:n_floats * 4])
-                            peak = max(abs(s) for s in samples) if samples else 0
-                            print(f"[relay] First audio chunk: {len(message)} bytes, {n_floats} floats, peak={peak:.4f}", flush=True)
-                        else:
-                            samples = struct.unpack(f"<{n_floats}f", message[:n_floats * 4])
+                            print(f"{tag} First audio: {len(message)} bytes, {n_floats} floats, peak={peak:.4f}", flush=True)
+                        elif chunks % 50 == 0:
+                            print(f"{tag} chunk#{chunks} peak={peak:.4f}", flush=True)
                         msg = msgpack.packb(
                             {"type": "Audio", "pcm": samples},
                             use_single_float=True,
@@ -255,23 +274,29 @@ async def relay_client(client_ws):
                         await moshi_ws.send(msg)
                         chunks += 1
                     else:
-                        print(f"[relay] Non-binary message: type={type(message).__name__} len={len(message)} preview={str(message)[:200]}", flush=True)
+                        print(f"{tag} Non-binary message: type={type(message).__name__} len={len(message)} preview={str(message)[:200]}", flush=True)
             except websockets.exceptions.ConnectionClosed:
                 pass
-            print(f"[relay] Forward audio done: {chunks} chunks sent", flush=True)
+            print(f"{tag} Audio done: {chunks} good, {bad_chunks} bad chunks", flush=True)
 
         async def forward_words():
             """Moshi msgpack responses -> JSON -> client."""
+            words = []
             try:
                 async for message in moshi_ws:
                     data = msgpack.unpackb(message, raw=False)
                     if isinstance(data, dict):
+                        if data.get("type") == "Word" and data.get("text"):
+                            words.append(data["text"])
+                            print(f"{tag} WORD: '{data['text']}'", flush=True)
                         try:
                             await client_ws.send(json.dumps(data))
                         except websockets.exceptions.ConnectionClosed:
                             break
             except websockets.exceptions.ConnectionClosed:
                 pass
+            if words:
+                print(f"{tag} Transcribed: {' '.join(words)}", flush=True)
 
         audio_task = asyncio.create_task(forward_audio())
         words_task = asyncio.create_task(forward_words())
@@ -298,7 +323,7 @@ async def relay_client(client_ws):
             pass
 
     except Exception as e:
-        print(f"[relay] Error: {e}", flush=True)
+        print(f"{tag} Error: {e}", flush=True)
         try:
             await client_ws.send(json.dumps({"type": "error", "text": str(e)}))
         except Exception:
@@ -310,7 +335,7 @@ async def relay_client(client_ws):
                 await moshi_ws.close()
             except Exception:
                 pass
-        print("[relay] Client disconnected, moshi connection closed", flush=True)
+        print(f"{tag} Disconnected, moshi connection closed", flush=True)
 
 
 async def run_relay_server():
