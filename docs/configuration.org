@@ -2,11 +2,11 @@
 
 * Home Manager options
 
-All options live under =services.wayland-stt=:
+All options live under =services.stt-anywhere=:
 
 | Option              | Type            | Default                        | Description                                                            |
 |---------------------+-----------------+--------------------------------+------------------------------------------------------------------------|
-| =enable=            | bool            |                                | Enable the wayland-stt client service                                  |
+| =enable=            | bool            |                                | Enable the stt-anywhere client service                                  |
 | =enableServer=      | bool            | =true=                         | Run a local moshi-server. Set =false= for remote-only clients          |
 | =cudaCapability=    | string          | ="8.6"=                        | CUDA compute capability for moshi-server                               |
 | =serverAddr=        | string          | ="127.0.0.1"=                  | Bind address for moshi-server. ="0.0.0.0"= to accept remote clients   |
@@ -14,8 +14,8 @@ All options live under =services.wayland-stt=:
 | =serverPort=        | port            | =8098=                         | Port for moshi-server                                                  |
 | =sttModel=          | string          | ="kyutai/stt-1b-en_fr-candle"= | HuggingFace model repo                                                |
 | =language=          | null or string  | =null=                         | Language hint (=null= for auto-detect)                                 |
-| =extraEnvironment=  | attrs of string | ={}=                           | Extra env vars for the wayland-stt service                             |
-| =package=           | package         | /auto/                         | Override the wayland-stt client package                                |
+| =extraEnvironment=  | attrs of string | ={}=                           | Extra env vars for the stt-anywhere service                             |
+| =package=           | package         | /auto/                         | Override the stt-anywhere client package                                |
 | =moshiPackage=      | package         | /auto/                         | Override the moshi-server package                                      |
 
 * Environment variables
@@ -24,9 +24,9 @@ These can be set via =extraEnvironment= or in the shell when running standalone:
 
 | Variable                | Default                | Description                          |
 |-------------------------+------------------------+--------------------------------------|
-| =WAYLAND_STT_SERVER=    | =ws://127.0.0.1:8098=  | WebSocket URL for moshi-server       |
-| =WAYLAND_STT_API_KEY=   | =public_token=          | API key for moshi-server auth        |
-| =WAYLAND_STT_TARGET=    | /empty (default mic)/  | PipeWire node id/name to capture     |
+| =STT_ANYWHERE_SERVER=    | =ws://127.0.0.1:8098=  | WebSocket URL for moshi-server       |
+| =STT_ANYWHERE_API_KEY=   | =public_token=          | API key for moshi-server auth        |
+| =STT_ANYWHERE_TARGET=    | /empty (default mic)/  | PipeWire node id/name to capture     |
 
 * Keybinds
 
@@ -36,21 +36,21 @@ Send =SIGUSR1= to toggle recording, =SIGUSR2= to switch between mic and system a
 
 #+begin_src kdl
 binds {
-    Mod+V       { spawn "systemctl" "--user" "kill" "-s" "USR1" "wayland-stt.service"; }
-    Mod+Shift+V { spawn "systemctl" "--user" "kill" "-s" "USR2" "wayland-stt.service"; }
+    Mod+V       { spawn "systemctl" "--user" "kill" "-s" "USR1" "stt-anywhere.service"; }
+    Mod+Shift+V { spawn "systemctl" "--user" "kill" "-s" "USR2" "stt-anywhere.service"; }
 }
 #+end_src
 
 ** Hyprland
 
 #+begin_src conf
-bind = SUPER, V, exec, systemctl --user kill -s USR1 wayland-stt.service
-bind = SUPER SHIFT, V, exec, systemctl --user kill -s USR2 wayland-stt.service
+bind = SUPER, V, exec, systemctl --user kill -s USR1 stt-anywhere.service
+bind = SUPER SHIFT, V, exec, systemctl --user kill -s USR2 stt-anywhere.service
 #+end_src
 
 ** Sway
 
 #+begin_src conf
-bindsym $mod+v exec systemctl --user kill -s USR1 wayland-stt.service
-bindsym $mod+Shift+v exec systemctl --user kill -s USR2 wayland-stt.service
+bindsym $mod+v exec systemctl --user kill -s USR1 stt-anywhere.service
+bindsym $mod+Shift+v exec systemctl --user kill -s USR2 stt-anywhere.service
 #+end_src

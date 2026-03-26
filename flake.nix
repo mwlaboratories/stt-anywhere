@@ -46,8 +46,8 @@
         {
           imports = [ ./nix/hm-module.nix ];
 
-          config = lib.mkIf config.services.wayland-stt.enable {
-            services.wayland-stt = {
+          config = lib.mkIf config.services.stt-anywhere.enable {
+            services.stt-anywhere = {
               package = lib.mkDefault (pkgs.callPackage ./nix/package.nix {
                 python = pkgs.python3.withPackages (ps: [
                   ps.websockets
@@ -66,7 +66,7 @@
                   };
                 in
                 (cudaPkgs'.moshi.override {
-                  inherit (config.services.wayland-stt) cudaCapability;
+                  inherit (config.services.stt-anywhere) cudaCapability;
                 }).overrideAttrs (old: {
                   buildInputs = old.buildInputs ++ [ pkgs.oniguruma ];
                   env = (old.env or { }) // {
@@ -84,8 +84,8 @@
         {
           imports = [ ./nix/nixos-module.nix ];
 
-          config = lib.mkIf config.programs.wayland-stt.enable {
-            programs.wayland-stt = {
+          config = lib.mkIf config.programs.stt-anywhere.enable {
+            programs.stt-anywhere = {
               package = lib.mkDefault (pkgs.callPackage ./nix/package.nix {
                 python = pkgs.python3.withPackages (ps: [
                   ps.websockets

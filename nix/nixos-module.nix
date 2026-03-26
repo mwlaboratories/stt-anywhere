@@ -4,15 +4,15 @@
   ...
 }:
 let
-  cfg = config.programs.wayland-stt;
+  cfg = config.programs.stt-anywhere;
 in
 {
-  options.programs.wayland-stt = {
-    enable = lib.mkEnableOption "wayland-stt push-to-talk speech-to-text";
+  options.programs.stt-anywhere = {
+    enable = lib.mkEnableOption "stt-anywhere push-to-talk speech-to-text";
 
     package = lib.mkOption {
       type = lib.types.package;
-      description = "The wayland-stt package to use.";
+      description = "The stt-anywhere package to use.";
     };
 
     moshiPackage = lib.mkOption {

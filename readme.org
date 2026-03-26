@@ -1,4 +1,4 @@
-#+title: wayland-stt
+#+title: stt-anywhere
 #+description: Talk anywhere. Words appear at your cursor.
 
 [[https://github.com/kyutai-labs/moshi][Kyutai STT]] powered push-to-talk for Wayland. Hold a key, speak, release — words stream into any text field in real time. ~500 ms latency. Runs entirely on your hardware.
@@ -9,7 +9,7 @@
 
 * Why
 
-Every other speech-to-text tool either sends your audio to a server you don't control, or transcribes in batch after you're done talking. wayland-stt does neither. It streams words as you speak, locally, on your GPU.
+Every other speech-to-text tool either sends your audio to a server you don't control, or transcribes in batch after you're done talking. stt-anywhere does neither. It streams words as you speak, locally, on your GPU.
 
 - *Real-time* — words appear while you're still talking
 - *Private* — audio never leaves your machine or network
@@ -18,13 +18,13 @@ Every other speech-to-text tool either sends your audio to a server you don't co
 
 * Client / Server
 
-wayland-stt separates the heavy GPU inference from the lightweight client. One beefy machine can serve your entire network.
+stt-anywhere separates the heavy GPU inference from the lightweight client. One beefy machine can serve your entire network.
 
 #+begin_example
 ┌─────────────────────────────┐         ┌─────────────────────────────┐
 │  desktop / laptop / phone   │         │      GPU workstation        │
 │                             │   ws    │                             │
-│  mic → wayland-stt ─────────┼────────►│  moshi-server (CUDA)        │
+│  mic → stt-anywhere ─────────┼────────►│  moshi-server (CUDA)        │
 │       (records + types)     │◄────────┼─── word tokens              │
 │                             │ tailscale│  model in VRAM (~2.4 GB)   │
 └─────────────────────────────┘         └─────────────────────────────┘
@@ -34,7 +34,7 @@ wayland-stt separates the heavy GPU inference from the lightweight client. One b
 ** Single machine (GPU + client together)
 
 #+begin_src nix
-services.wayland-stt = {
+services.stt-anywhere = {
   enable = true;
   cudaCapability = "8.6";  # RTX 3060-3090
 };
@@ -43,7 +43,7 @@ services.wayland-stt = {
 ** Server (GPU machine, shared on your network)
 
 #+begin_src nix
-services.wayland-stt = {
+services.stt-anywhere = {
   enable = true;
   cudaCapability = "8.6";
   serverAddr = "0.0.0.0";  # accept connections over Tailscale
@@ -53,7 +53,7 @@ services.wayland-stt = {
 ** Client (any machine, no GPU needed)
 
 #+begin_src nix
-services.wayland-stt = {
+services.stt-anywhere = {
   enable = true;
   enableServer = false;
   serverUrl = "ws://workstation:8098";  # point at your GPU machine
@@ -67,12 +67,12 @@ Add the flake input and import the Home Manager module:
 #+begin_src nix
 # flake.nix
 {
-  inputs.wayland-stt.url = "github:user/wayland-stt";
+  inputs.stt-anywhere.url = "github:user/stt-anywhere";
 
   # in your home-manager config:
-  imports = [ inputs.wayland-stt.homeManagerModules.default ];
+  imports = [ inputs.stt-anywhere.homeManagerModules.default ];
 
-  services.wayland-stt = {
+  services.stt-anywhere = {
     enable = true;
     cudaCapability = "8.6";
   };
@@ -84,8 +84,8 @@ Rebuild, bind a key to toggle recording, done:
 #+begin_src kdl
 // niri
 binds {
-    Mod+V       { spawn "systemctl" "--user" "kill" "-s" "USR1" "wayland-stt.service"; }
-    Mod+Shift+V { spawn "systemctl" "--user" "kill" "-s" "USR2" "wayland-stt.service"; }
+    Mod+V       { spawn "systemctl" "--user" "kill" "-s" "USR1" "stt-anywhere.service"; }
+    Mod+Shift+V { spawn "systemctl" "--user" "kill" "-s" "USR2" "stt-anywhere.service"; }
 }
 #+end_src
 

@@ -1,4 +1,4 @@
-"""wayland-stt: Local push-to-talk streaming speech-to-text for Wayland.
+"""stt-anywhere: Speech-to-text anywhere — Wayland desktop, AR glasses, any device.
 
 Streams audio to a Kyutai STT server via WebSocket and types words live via wtype.
 Pipeline: keybind -> SIGUSR1 -> pw-record -> moshi-server (CUDA) -> wtype
@@ -18,11 +18,11 @@ import time
 import msgpack
 import websockets
 
-SERVER_URL = os.environ.get("WAYLAND_STT_SERVER", "ws://127.0.0.1:8098")
-API_KEY = os.environ.get("WAYLAND_STT_API_KEY", "public_token")
-AUDIO_TARGET = os.environ.get("WAYLAND_STT_TARGET", "")  # PipeWire node id/name, empty = default
-RELAY_PORT = int(os.environ.get("WAYLAND_STT_RELAY_PORT", "0"))  # 0 = disabled
-RELAY_ADDR = os.environ.get("WAYLAND_STT_RELAY_ADDR", "0.0.0.0")
+SERVER_URL = os.environ.get("STT_ANYWHERE_SERVER", "ws://127.0.0.1:8098")
+API_KEY = os.environ.get("STT_ANYWHERE_API_KEY", "public_token")
+AUDIO_TARGET = os.environ.get("STT_ANYWHERE_TARGET", "")  # PipeWire node id/name, empty = default
+RELAY_PORT = int(os.environ.get("STT_ANYWHERE_RELAY_PORT", "0"))  # 0 = disabled
+RELAY_ADDR = os.environ.get("STT_ANYWHERE_RELAY_ADDR", "0.0.0.0")
 
 SAMPLE_RATE = 24000
 CHANNELS = 1
@@ -51,10 +51,10 @@ def notify(message, urgency="normal"):
     subprocess.Popen(
         [
             "notify-send",
-            "-a", "wayland-stt",
-            "-h", "string:x-canonical-private-synchronous:wayland-stt",
+            "-a", "stt-anywhere",
+            "-h", "string:x-canonical-private-synchronous:stt-anywhere",
             "-u", urgency,
-            "wayland-stt",
+            "stt-anywhere",
             message,
         ],
         stdout=subprocess.DEVNULL,

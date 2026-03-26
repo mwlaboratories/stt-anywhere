@@ -4,7 +4,7 @@
   src,
 }:
 pkgs.writeShellApplication {
-  name = "wayland-stt";
+  name = "stt-anywhere";
   runtimeInputs = [
     python
     pkgs.wtype
@@ -13,6 +13,6 @@ pkgs.writeShellApplication {
     pkgs.wireplumber
   ];
   text = ''
-    exec python ${src}/wayland-stt.py "$@"
+    exec python ${src}/stt-anywhere.py "$@"
   '';
 }

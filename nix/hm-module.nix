@@ -5,12 +5,12 @@
   ...
 }:
 let
-  cfg = config.services.wayland-stt;
+  cfg = config.services.stt-anywhere;
 
   sttConfig = pkgs.writeText "stt-config.toml" ''
     static_dir = "/tmp"
     log_dir = "/tmp"
-    instance_name = "wayland-stt-moshi"
+    instance_name = "stt-anywhere-moshi"
     authorized_ids = ["public_token"]
 
     [modules.asr]
@@ -57,12 +57,12 @@ let
   '';
 in
 {
-  options.services.wayland-stt = {
-    enable = lib.mkEnableOption "wayland-stt push-to-talk speech-to-text daemon";
+  options.services.stt-anywhere = {
+    enable = lib.mkEnableOption "stt-anywhere speech-to-text daemon";
 
     package = lib.mkOption {
       type = lib.types.package;
-      description = "The wayland-stt package to use.";
+      description = "The stt-anywhere package to use.";
     };
 
     moshiPackage = lib.mkOption {
@@ -103,7 +103,7 @@ in
     serverUrl = lib.mkOption {
       type = lib.types.str;
       default = "ws://127.0.0.1:${toString cfg.serverPort}";
-      description = "WebSocket URL the wayland-stt client connects to. Override to point at a remote moshi-server (e.g. \"ws://eos:8098\").";
+      description = "WebSocket URL the stt-anywhere client connects to. Override to point at a remote moshi-server (e.g. \"ws://eos:8098\").";
     };
 
     relayPort = lib.mkOption {
@@ -121,14 +121,14 @@ in
     extraEnvironment = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = { };
-      description = "Extra environment variables to pass to the wayland-stt service.";
+      description = "Extra environment variables to pass to the stt-anywhere service.";
     };
   };
 
   config = lib.mkIf cfg.enable {
     systemd.user.services.moshi-server = lib.mkIf cfg.enableServer {
       Unit = {
-        Description = "Kyutai STT server for wayland-stt";
+        Description = "Kyutai STT server for stt-anywhere";
         After = [ "graphical-session.target" ];
         PartOf = [ "graphical-session.target" ];
       };
@@ -145,9 +145,9 @@ in
       };
     };
 
-    systemd.user.services.wayland-stt = {
+    systemd.user.services.stt-anywhere = {
       Unit = {
-        Description = "wayland-stt push-to-talk speech-to-text daemon";
+        Description = "stt-anywhere speech-to-text daemon";
         After =
           [ "graphical-session.target" ]
           ++ lib.optionals cfg.enableServer [ "moshi-server.service" ];
@@ -157,14 +157,14 @@ in
 
       Service = {
         Type = "simple";
-        ExecStart = "${cfg.package}/bin/wayland-stt";
+        ExecStart = "${cfg.package}/bin/stt-anywhere";
         Restart = "on-failure";
         RestartSec = 5;
         Environment =
           [
-            "WAYLAND_STT_SERVER=${cfg.serverUrl}"
-            "WAYLAND_STT_RELAY_PORT=${toString cfg.relayPort}"
-            "WAYLAND_STT_RELAY_ADDR=${cfg.relayAddr}"
+            "STT_ANYWHERE_SERVER=${cfg.serverUrl}"
+            "STT_ANYWHERE_RELAY_PORT=${toString cfg.relayPort}"
+            "STT_ANYWHERE_RELAY_ADDR=${cfg.relayAddr}"
           ]
           ++ lib.mapAttrsToList (name: value: "${name}=${value}") cfg.extraEnvironment;
       };

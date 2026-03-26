@@ -4,16 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-wayland-stt is a local push-to-talk streaming speech-to-text daemon for Wayland. It streams audio to a Kyutai STT server (moshi-server) via WebSocket and types words live as they're recognized. Works on any Wayland compositor (niri, Hyprland, Sway, COSMIC, etc.).
+stt-anywhere is a local push-to-talk streaming speech-to-text daemon for Wayland. It streams audio to a Kyutai STT server (moshi-server) via WebSocket and types words live as they're recognized. Works on any Wayland compositor (niri, Hyprland, Sway, COSMIC, etc.).
 
 **Pipeline:** keybind -> SIGUSR1 -> `pw-record` -> moshi-server (CUDA) -> `wtype` (live)
 
 ## Architecture
 
-Two-service design: a Rust STT server (`moshi-server`) handles GPU inference, and a lightweight Python client (`wayland-stt.py`) manages recording and text injection.
+Two-service design: a Rust STT server (`moshi-server`) handles GPU inference, and a lightweight Python client (`stt-anywhere.py`) manages recording and text injection.
 
 ```
-[moshi-server]                        [wayland-stt.py]
+[moshi-server]                        [stt-anywhere.py]
 (systemd service)                     (systemd service)
 Loads STT model in VRAM               Lightweight WS client
 Listens ws://localhost:8098
@@ -36,35 +36,35 @@ Listens ws://localhost:8098
 
 ## Deployment (path: flake input)
 
-Changes to `wayland-stt.py` must be **staged or committed** before rebuilding — Nix `path:` flake inputs ignore unstaged files.
+Changes to `stt-anywhere.py` must be **staged or committed** before rebuilding — Nix `path:` flake inputs ignore unstaged files.
 
 ```sh
-# In wayland-stt repo:
-git add wayland-stt.py
+# In stt-anywhere repo:
+git add stt-anywhere.py
 
 # In nixos-config repo:
-nix flake update wayland-stt
+nix flake update stt-anywhere
 sudo nixos-rebuild switch
-systemctl --user restart wayland-stt
+systemctl --user restart stt-anywhere
 ```
 
 ## File Structure
 
 ```
 flake.nix              # Flake: packages, homeManagerModules, nixosModules, devShells
-wayland-stt.py           # Main Python application (WebSocket client)
+stt-anywhere.py           # Main Python application (WebSocket client)
 nix/
   package.nix          # Package derivation (writeShellApplication wrapper)
-  hm-module.nix        # Home Manager module (services.wayland-stt + moshi-server)
-  nixos-module.nix     # NixOS module (programs.wayland-stt)
+  hm-module.nix        # Home Manager module (services.stt-anywhere + moshi-server)
+  nixos-module.nix     # NixOS module (programs.stt-anywhere)
 ```
 
 ## Build & Run
 
-Nix flake, x86_64-linux only. The wayland-stt client itself does not require CUDA — that's handled by moshi-server:
+Nix flake, x86_64-linux only. The stt-anywhere client itself does not require CUDA — that's handled by moshi-server:
 
 ```sh
-nix build                  # builds the wayland-stt client wrapper
+nix build                  # builds the stt-anywhere client wrapper
 nix build .#moshi-server   # builds moshi-server with CUDA (from nixpkgs moshi + oniguruma fix)
 nix run                    # runs client (needs moshi-server running separately)
 nix develop                # dev shell with all dependencies
@@ -80,61 +80,61 @@ The `moshi-server` package in the flake overrides `pkgs.moshi` from nixpkgs to f
 
 ```nix
 # flake.nix inputs:
-inputs.wayland-stt.url = "github:user/wayland-stt";
+inputs.stt-anywhere.url = "github:user/stt-anywhere";
 
 # Home Manager — local server + client (default):
-imports = [ inputs.wayland-stt.homeManagerModules.default ];
-services.wayland-stt = {
+imports = [ inputs.stt-anywhere.homeManagerModules.default ];
+services.stt-anywhere = {
   enable = true;
   cudaCapability = "8.6";  # "8.9" for RTX 4090, etc.
   serverAddr = "0.0.0.0";  # optional: accept remote connections (e.g. Tailscale)
 };
 
 # Home Manager — remote client only (no local GPU):
-imports = [ inputs.wayland-stt.homeManagerModules.default ];
-services.wayland-stt = {
+imports = [ inputs.stt-anywhere.homeManagerModules.default ];
+services.stt-anywhere = {
   enable = true;
   enableServer = false;          # no local moshi-server
   serverUrl = "ws://eos:8098";   # connect to remote server over Tailscale
 };
 
 # NixOS (just adds packages to systemPackages):
-imports = [ inputs.wayland-stt.nixosModules.default ];
-programs.wayland-stt.enable = true;
+imports = [ inputs.stt-anywhere.nixosModules.default ];
+programs.stt-anywhere.enable = true;
 ```
 
 Keybind examples (any Wayland compositor):
 ```kdl
 // niri
 binds {
-    Mod+V { spawn "systemctl" "--user" "kill" "-s" "USR1" "wayland-stt.service"; }
-    Mod+Shift+V { spawn "systemctl" "--user" "kill" "-s" "USR2" "wayland-stt.service"; }
+    Mod+V { spawn "systemctl" "--user" "kill" "-s" "USR1" "stt-anywhere.service"; }
+    Mod+Shift+V { spawn "systemctl" "--user" "kill" "-s" "USR2" "stt-anywhere.service"; }
 }
 ```
 
 ## Home Manager Module Options
 
-Under `services.wayland-stt`:
-- `enable` — enable the wayland-stt client service (and moshi-server if `enableServer` is true)
+Under `services.stt-anywhere`:
+- `enable` — enable the stt-anywhere client service (and moshi-server if `enableServer` is true)
 - `enableServer` — whether to run a local moshi-server (default: `true`). Set to `false` on machines without a GPU that connect to a remote server
 - `cudaCapability` — CUDA compute capability for moshi-server (default: `"8.6"`, e.g. `"8.9"` for RTX 4090)
 - `serverAddr` — address for moshi-server to bind to (default: `"127.0.0.1"`). Set to `"0.0.0.0"` to accept remote connections (e.g. over Tailscale)
 - `serverUrl` — WebSocket URL the client connects to (default: `"ws://127.0.0.1:${serverPort}"`). Override to point at a remote server (e.g. `"ws://eos:8098"`)
 - `serverPort` — port for moshi-server (default: `8098`)
-- `package` — the wayland-stt package (auto-provided, override for custom builds)
+- `package` — the stt-anywhere package (auto-provided, override for custom builds)
 - `moshiPackage` — the moshi-server package (auto-built from `cudaCapability`, override for custom builds)
 - `sttModel` — HuggingFace model repo (default: `"kyutai/stt-1b-en_fr-candle"`)
 - `extraEnvironment` — extra environment variables (default: `{}`)
 
 ## Environment Variables
 
-- `WAYLAND_STT_SERVER` — WebSocket URL for moshi-server (default: `ws://127.0.0.1:8098`)
-- `WAYLAND_STT_API_KEY` — API key for moshi-server auth (default: `public_token`)
-- `WAYLAND_STT_TARGET` — PipeWire node id/name for audio capture (default: empty = default mic)
+- `STT_ANYWHERE_SERVER` — WebSocket URL for moshi-server (default: `ws://127.0.0.1:8098`)
+- `STT_ANYWHERE_API_KEY` — API key for moshi-server auth (default: `public_token`)
+- `STT_ANYWHERE_TARGET` — PipeWire node id/name for audio capture (default: empty = default mic)
 
 ## Runtime Dependencies
 
-- **wayland-stt.py:** Python with `websockets` + `msgpack`, `wtype`, `libnotify`, `pipewire`, `wireplumber`
+- **stt-anywhere.py:** Python with `websockets` + `msgpack`, `wtype`, `libnotify`, `pipewire`, `wireplumber`
 - **moshi-server:** Rust binary with CUDA (candle), provided by user
 
 Models are downloaded by moshi-server from HuggingFace on first run (~2.4GB for the 1B model).

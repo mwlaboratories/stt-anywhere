@@ -4,23 +4,23 @@
 
 #+begin_src sh
 nix develop                # dev shell with all dependencies
-nix build                  # build the wayland-stt client
+nix build                  # build the stt-anywhere client
 nix build .#moshi-server   # build moshi-server with CUDA
 nix flake check            # verify the flake
 #+end_src
 
 * Deploying changes
 
-Changes to =wayland-stt.py= must be *staged or committed* before rebuilding — Nix =path:= flake inputs ignore unstaged files.
+Changes to =stt-anywhere.py= must be *staged or committed* before rebuilding — Nix =path:= flake inputs ignore unstaged files.
 
 #+begin_src sh
-# In wayland-stt repo:
-git add wayland-stt.py
+# In stt-anywhere repo:
+git add stt-anywhere.py
 
 # In nixos-config repo:
-nix flake update wayland-stt
+nix flake update stt-anywhere
 sudo nixos-rebuild switch
-systemctl --user restart wayland-stt
+systemctl --user restart stt-anywhere
 #+end_src
 
 * NixOS module (alternative)
@@ -28,8 +28,8 @@ systemctl --user restart wayland-stt
 For manual service management instead of Home Manager:
 
 #+begin_src nix
-imports = [ inputs.wayland-stt.nixosModules.default ];
-programs.wayland-stt.enable = true;
+imports = [ inputs.stt-anywhere.nixosModules.default ];
+programs.stt-anywhere.enable = true;
 #+end_src
 
 This just adds the packages to =environment.systemPackages=.

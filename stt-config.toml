@@ -1,6 +1,6 @@
 static_dir = "/tmp"
 log_dir = "/tmp"
-instance_name = "wayland-stt-moshi"
+instance_name = "stt-anywhere-moshi"
 authorized_ids = ["public_token"]
 
 [modules.asr]

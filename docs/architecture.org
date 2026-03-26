@@ -5,7 +5,7 @@
 Two systemd user services connected over WebSocket:
 
 #+begin_example
-[moshi-server]                        [wayland-stt.py]
+[moshi-server]                        [stt-anywhere.py]
 (systemd service)                     (systemd service)
 Loads STT model in VRAM               Lightweight WebSocket client
 Listens ws://localhost:8098
@@ -18,7 +18,7 @@ Listens ws://localhost:8098
 #+end_example
 
 - *moshi-server* — Rust binary (candle + CUDA), keeps the STT model in VRAM, runs inference on GPU
-- *wayland-stt* — lightweight Python client: records audio via PipeWire, streams MessagePack chunks over WebSocket, types each recognized word with =wtype=
+- *stt-anywhere* — lightweight Python client: records audio via PipeWire, streams MessagePack chunks over WebSocket, types each recognized word with =wtype=
 
 * Protocol
 
@@ -38,7 +38,7 @@ Listens ws://localhost:8098
 
 #+begin_example
 flake.nix              Flake: packages, modules, devShells
-wayland-stt.py         Python client (WebSocket, pw-record, wtype)
+stt-anywhere.py         Python client (WebSocket, pw-record, wtype)
 nix/
   package.nix          Package derivation (writeShellApplication wrapper)
   hm-module.nix        Home Manager module (systemd services)
@@ -51,6 +51,6 @@ nix/
 
 Rust binary with CUDA (candle). Models downloaded from HuggingFace on first run (~2.4 GB for the 1B model).
 
-** wayland-stt client
+** stt-anywhere client
 
 Python with =websockets= + =msgpack=, =wtype=, =libnotify=, =pipewire=, =wireplumber=. Packaged as a =writeShellApplication= wrapper with all dependencies on =PATH=.
