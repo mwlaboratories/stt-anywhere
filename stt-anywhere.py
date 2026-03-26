@@ -235,20 +235,30 @@ async def relay_client(client_ws):
 
         async def forward_audio():
             """Client binary f32 PCM -> msgpack -> moshi."""
+            chunks = 0
             try:
                 async for message in client_ws:
                     if isinstance(message, bytes):
                         n_floats = len(message) // 4
                         if n_floats == 0:
                             continue
-                        samples = struct.unpack(f"<{n_floats}f", message[:n_floats * 4])
+                        if chunks == 0:
+                            samples = struct.unpack(f"<{n_floats}f", message[:n_floats * 4])
+                            peak = max(abs(s) for s in samples) if samples else 0
+                            print(f"[relay] First audio chunk: {len(message)} bytes, {n_floats} floats, peak={peak:.4f}", flush=True)
+                        else:
+                            samples = struct.unpack(f"<{n_floats}f", message[:n_floats * 4])
                         msg = msgpack.packb(
                             {"type": "Audio", "pcm": samples},
                             use_single_float=True,
                         )
                         await moshi_ws.send(msg)
+                        chunks += 1
+                    else:
+                        print(f"[relay] Non-binary message: type={type(message).__name__} len={len(message)} preview={str(message)[:200]}", flush=True)
             except websockets.exceptions.ConnectionClosed:
                 pass
+            print(f"[relay] Forward audio done: {chunks} chunks sent", flush=True)
 
         async def forward_words():
             """Moshi msgpack responses -> JSON -> client."""
