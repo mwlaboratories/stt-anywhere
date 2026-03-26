@@ -218,67 +218,74 @@ async def relay_client(client_ws):
     moshi_url = f"{SERVER_URL}/api/asr-streaming?auth_id={API_KEY}"
     print(f"[relay] Client connected, relaying to {SERVER_URL}", flush=True)
 
+    moshi_ws = None
     try:
-        async with websockets.connect(moshi_url) as moshi_ws:
-            # Send preamble silence to moshi
-            silence_msg = msgpack.packb(
-                {"type": "Audio", "pcm": [0.0] * CHUNK_SAMPLES},
-                use_single_float=True,
-            )
-            for _ in range(PREAMBLE_CHUNKS):
-                await moshi_ws.send(silence_msg)
-            print("[relay] Preamble sent", flush=True)
+        moshi_ws = await websockets.connect(moshi_url)
 
-            await client_ws.send(json.dumps({"type": "ready"}))
+        # Send preamble silence to moshi
+        silence_msg = msgpack.packb(
+            {"type": "Audio", "pcm": [0.0] * CHUNK_SAMPLES},
+            use_single_float=True,
+        )
+        for _ in range(PREAMBLE_CHUNKS):
+            await moshi_ws.send(silence_msg)
+        print("[relay] Preamble sent", flush=True)
 
-            async def forward_audio():
-                """Client binary f32 PCM -> msgpack -> moshi."""
-                try:
-                    async for message in client_ws:
-                        if isinstance(message, bytes):
-                            n_floats = len(message) // 4
-                            if n_floats == 0:
-                                continue
-                            samples = struct.unpack(f"<{n_floats}f", message[:n_floats * 4])
-                            msg = msgpack.packb(
-                                {"type": "Audio", "pcm": samples},
-                                use_single_float=True,
-                            )
-                            await moshi_ws.send(msg)
-                except websockets.exceptions.ConnectionClosed:
-                    pass
+        await client_ws.send(json.dumps({"type": "ready"}))
 
-            async def forward_words():
-                """Moshi msgpack responses -> JSON -> client."""
-                try:
-                    async for message in moshi_ws:
-                        data = msgpack.unpackb(message, raw=False)
-                        if isinstance(data, dict):
+        async def forward_audio():
+            """Client binary f32 PCM -> msgpack -> moshi."""
+            try:
+                async for message in client_ws:
+                    if isinstance(message, bytes):
+                        n_floats = len(message) // 4
+                        if n_floats == 0:
+                            continue
+                        samples = struct.unpack(f"<{n_floats}f", message[:n_floats * 4])
+                        msg = msgpack.packb(
+                            {"type": "Audio", "pcm": samples},
+                            use_single_float=True,
+                        )
+                        await moshi_ws.send(msg)
+            except websockets.exceptions.ConnectionClosed:
+                pass
+
+        async def forward_words():
+            """Moshi msgpack responses -> JSON -> client."""
+            try:
+                async for message in moshi_ws:
+                    data = msgpack.unpackb(message, raw=False)
+                    if isinstance(data, dict):
+                        try:
                             await client_ws.send(json.dumps(data))
-                except websockets.exceptions.ConnectionClosed:
-                    pass
+                        except websockets.exceptions.ConnectionClosed:
+                            break
+            except websockets.exceptions.ConnectionClosed:
+                pass
 
-            audio_task = asyncio.create_task(forward_audio())
-            words_task = asyncio.create_task(forward_words())
+        audio_task = asyncio.create_task(forward_audio())
+        words_task = asyncio.create_task(forward_words())
 
-            # Wait for client to disconnect (audio_task finishes)
-            await audio_task
+        # Wait for client to disconnect (audio_task finishes)
+        await audio_task
 
-            # Send trailing silence burst so moshi flushes
+        # Send trailing silence burst so moshi flushes (best-effort)
+        try:
             for _ in range(TRAILING_CHUNKS):
                 await moshi_ws.send(silence_msg)
+        except websockets.exceptions.ConnectionClosed:
+            pass
 
-            # Drain: wait for final words (max 2s, stop if silent for 0.5s)
-            drain_start = time.monotonic()
-            while time.monotonic() - drain_start < 2.0:
-                await asyncio.sleep(0.05)
+        # Drain: wait for final words (max 2s, stop if silent for 0.5s)
+        drain_start = time.monotonic()
+        while time.monotonic() - drain_start < 2.0:
+            await asyncio.sleep(0.05)
 
-            await moshi_ws.close()
-            words_task.cancel()
-            try:
-                await words_task
-            except asyncio.CancelledError:
-                pass
+        words_task.cancel()
+        try:
+            await words_task
+        except asyncio.CancelledError:
+            pass
 
     except Exception as e:
         print(f"[relay] Error: {e}", flush=True)
@@ -286,8 +293,14 @@ async def relay_client(client_ws):
             await client_ws.send(json.dumps({"type": "error", "text": str(e)}))
         except Exception:
             pass
-
-    print("[relay] Client disconnected", flush=True)
+    finally:
+        # Always close moshi WebSocket to free the server slot
+        if moshi_ws is not None:
+            try:
+                await moshi_ws.close()
+            except Exception:
+                pass
+        print("[relay] Client disconnected, moshi connection closed", flush=True)
 
 
 async def run_relay_server():
