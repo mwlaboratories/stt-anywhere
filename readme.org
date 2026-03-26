@@ -1,7 +1,7 @@
 #+title: stt-anywhere
-#+description: Speech-to-text anywhere — desktop, AR glasses, any device.
+#+description: Speech-to-text anywhere. Desktop, AR glasses, any device.
 
-[[https://github.com/kyutai-labs/moshi][Kyutai STT]] powered speech-to-text service. Streams words in real time from any device on your network — Wayland desktops via push-to-talk, AR glasses via WebSocket relay. Runs entirely on your hardware.
+[[https://github.com/kyutai-labs/moshi][Kyutai STT]] powered speech-to-text service. Streams words in real time from any device on your network. Wayland desktops via push-to-talk, AR glasses via WebSocket relay. Runs entirely on your hardware.
 
 #+begin_example
   speak → words appear live ✦ no cloud, no subscription, no latency
@@ -15,13 +15,12 @@
 │                                                 │
 │  stt-anywhere.py (one systemd service)          │
 │  ├── push-to-talk    keyboard → wtype (local)   │
-│  ├── :8099/stt       WebSocket relay (remote)   │
-│  ├── :8099/api/discord  Discord proxy (remote)  │
+│  ├── :8099           WebSocket relay (remote)   │
 │  │                                              │
 │  │         both send audio to:                  │
 │  │                ▼                             │
 │  │   moshi-server :8098 (CUDA)                  │
-│  │   audio ──► text (~500ms latency)            │
+│  │   audio → text (~500ms latency)              │
 │  │   model in VRAM (~2.4 GB)                    │
 │  └──────────────────────────────────────────────│
 └────────────────────────┬────────────────────────┘
@@ -48,14 +47,14 @@ Press a key, speak, release. Words stream into whatever text field has focus via
 
 ** AR glasses relay
 
-The relay server accepts WebSocket audio from remote clients (e.g. [[https://github.com/mwlaboratories/deltaclaw][deltaclaw]] on Even Hub glasses) and returns transcribed words as JSON. Also proxies Discord API calls so the glasses app can browse channels and send messages by voice.
+The relay server accepts WebSocket audio from remote clients (e.g. [[https://github.com/mwlaboratories/deltaclaw][deltaclaw]] on Even Hub glasses) and returns transcribed words as JSON.
 
 * Why
 
-- *Real-time* — words appear while you're still talking
-- *Private* — audio never leaves your machine or network
-- *Multi-device* — one GPU serves desktops, laptops, glasses, anything
-- *Set and forget* — systemd services start with your session
+- *Real-time* : words appear while you're still talking
+- *Private* : audio never leaves your machine or network
+- *Multi-device* : one GPU serves desktops, laptops, glasses, anything
+- *Set and forget* : systemd services start with your session
 
 * Quick start
 
@@ -105,10 +104,8 @@ services.stt-anywhere = {
 services.stt-anywhere = {
   enable = true;
   cudaCapability = "8.6";
-  serverAddr = "0.0.0.0";       # accept moshi connections over Tailscale
-  relayPort = 8099;              # WebSocket relay + Discord proxy for glasses
-  discordGuildId = "123456789";  # Discord server ID
-  discordTokenFile = "/run/secrets/discord-token";  # bot token
+  serverAddr = "0.0.0.0";  # accept moshi connections over Tailscale
+  relayPort = 8099;         # WebSocket relay for remote clients
 };
 #+end_src
 
@@ -121,26 +118,6 @@ services.stt-anywhere = {
   serverUrl = "ws://workstation:8098";
 };
 #+end_src
-
-* Discord proxy
-
-When =discordTokenFile= and =discordGuildId= are set, the relay server exposes a Discord API proxy:
-
-| Endpoint                                  | Method | Description        |
-|-------------------------------------------+--------+--------------------|
-| =/api/discord/channels=                   | GET    | List text channels |
-| =/api/discord/channels/:id/messages=      | GET    | Fetch messages     |
-| =/api/discord/channels/:id/messages=      | POST   | Send a message     |
-
-The bot token stays on your server — clients never see it.
-
-** Setting up the Discord bot
-
-1. [[https://discord.com/developers/applications][Discord Developer Portal]] — New Application — name it "deltaclaw"
-2. Bot tab — Reset Token — save the token
-3. OAuth2 — URL Generator — select =bot= scope + =Send Messages= + =Read Message History=
-4. Open the generated URL to invite the bot to your server
-5. Right-click your server name — Copy Server ID (enable Developer Mode in Discord settings first)
 
 * Requirements
 
@@ -165,6 +142,6 @@ The bot token stays on your server — clients never see it.
 
 * Documentation
 
-- [[file:docs/configuration.org][Configuration]] — all Home Manager options, environment variables, keybinds for every compositor
-- [[file:docs/architecture.org][Architecture]] — how the pieces fit together, protocol details, file structure
-- [[file:docs/development.org][Development]] — building, hacking, deploying changes
+- [[file:docs/configuration.org][Configuration]] : all Home Manager options, environment variables, keybinds for every compositor
+- [[file:docs/architecture.org][Architecture]] : how the pieces fit together, protocol details, file structure
+- [[file:docs/development.org][Development]] : building, hacking, deploying changes
