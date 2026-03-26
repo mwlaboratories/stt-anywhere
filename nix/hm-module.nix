@@ -109,7 +109,7 @@ in
     relayPort = lib.mkOption {
       type = lib.types.port;
       default = 0;
-      description = "Port for the WebSocket relay server (accepts remote STT clients like Even glasses). 0 = disabled.";
+      description = "Port for the WebSocket relay server (accepts remote STT clients like EvenRealities G2 glasses). 0 = disabled.";
     };
 
     relayAddr = lib.mkOption {

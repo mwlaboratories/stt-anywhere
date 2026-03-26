@@ -32,7 +32,7 @@
        ▼                 ▼                 ▼
 ┌─────────────┐  ┌──────────────┐  ┌─────────────┐
 │   Desktop   │  │  AR Glasses  │  │   Laptop    │
-│   (Wayland) │  │ (Even Hub)   │  │  (Wayland)  │
+│   (Wayland) │  │ (Even G2)    │  │  (Wayland)  │
 │             │  │              │  │             │
 │  Mod+Space  │  │  deltaclaw   │  │  Mod+Space  │
 │  to record  │  │  web app     │  │  to record  │
@@ -47,7 +47,7 @@ Press a key, speak, release. Words stream into whatever text field has focus via
 
 ** AR glasses relay
 
-The relay server accepts WebSocket audio from remote clients (e.g. [[https://github.com/mwlaboratories/deltaclaw][deltaclaw]] on Even Hub glasses) and returns transcribed words as JSON.
+The relay server accepts WebSocket audio from remote clients (e.g. [[https://github.com/mwlaboratories/deltaclaw][deltaclaw]] on EvenRealities G2 glasses) and returns transcribed words as JSON.
 
 * Why
 

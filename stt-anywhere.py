@@ -3,7 +3,7 @@
 Streams audio to a Kyutai STT server via WebSocket and types words live via wtype.
 Pipeline: keybind -> SIGUSR1 -> pw-record -> moshi-server (CUDA) -> wtype
 
-Optional relay server: accepts WebSocket clients (e.g. Even glasses browser app),
+Optional relay server: accepts WebSocket clients (e.g. EvenRealities G2 glasses app),
 relays their audio to moshi-server, and returns transcription results as JSON.
 """
 
